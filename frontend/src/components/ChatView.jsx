@@ -22,6 +22,7 @@ import {
   Trash,
 } from "lucide-react"
 import { Link } from "react-router-dom"
+import { api } from "../services/api"
 
 // Simple tooltip implementation
 const Tooltip = ({ children, content }) => {
@@ -46,10 +47,12 @@ function ChatView() {
   const currentDate = new Date().toLocaleString()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [conversationId, setConversationId] = useState(null)
+  const [isStreaming, setIsStreaming] = useState(false)
   const [messages, setMessages] = useState([
     {
-      sender: "Medicare Assistant",
-      text: "Hello, I am a Medicare assistance agent. How may I help you with your healthcare needs today?",
+      sender: "MedLLM Assistant",
+      text: "Hello! I'm MedLLM, your medical AI assistant. How can I help you with your healthcare questions today?",
       date: currentDate,
     },
   ])
@@ -192,42 +195,67 @@ function ChatView() {
     }
   }, [copiedMessageIndex])
 
-  // Handle sending a message
-  const handleSendMessage = () => {
-    if (inputText.trim()) {
-      const newMessage = {
-        sender: "User",
-        text: inputText,
-        date: new Date().toLocaleString(),
-      }
-      setMessages([...messages, newMessage])
-      setInputText("")
+  // Handle sending a message — now uses real backend API with streaming
+  const handleSendMessage = async () => {
+    if (!inputText.trim() || isStreaming) return
 
-      // Update the selected chat's message history if applicable
-      if (selectedChatId) {
-        const updatedChats = previousChats.map((chat) =>
-          chat.id === selectedChatId ? { ...chat, messages: [...chat.messages, newMessage] } : chat,
-        )
-        console.log("Updated chats:", updatedChats) // Replace with backend update
-      }
-
-      // Simulate assistant response (replace with API call in production)
-      setTimeout(() => {
-        const assistantResponse = {
-          sender: "Medicare Assistant",
-          text: "Thank you for your message! How can I assist you further?",
-          date: new Date().toLocaleString(),
-        }
-        setMessages((prev) => [...prev, assistantResponse])
-
-        if (selectedChatId) {
-          const updatedChats = previousChats.map((chat) =>
-            chat.id === selectedChatId ? { ...chat, messages: [...chat.messages, assistantResponse] } : chat,
-          )
-          console.log("Updated chats with assistant response:", updatedChats)
-        }
-      }, 1000)
+    const userText = inputText.trim()
+    const newMessage = {
+      sender: "User",
+      text: userText,
+      date: new Date().toLocaleString(),
     }
+
+    // Add user message to UI immediately
+    setMessages((prev) => [...prev, newMessage])
+    setInputText("")
+    setIsStreaming(true)
+
+    // Add an empty assistant message that we'll fill token by token
+    const assistantMessage = {
+      sender: "MedLLM Assistant",
+      text: "",
+      date: new Date().toLocaleString(),
+    }
+    setMessages((prev) => [...prev, assistantMessage])
+
+    // Call the real streaming API
+    const result = await api.chatStream(userText, {
+      conversationId,
+      mode: "normal",
+
+      // This callback runs for EACH token the LLM generates.
+      // We update the last message (the assistant's) by appending the token.
+      onToken: (token) => {
+        setMessages((prev) => {
+          const updated = [...prev]
+          const lastMsg = updated[updated.length - 1]
+          updated[updated.length - 1] = { ...lastMsg, text: lastMsg.text + token }
+          return updated
+        })
+      },
+
+      onDone: (data) => {
+        // Save the conversation ID so follow-up messages go to the same conversation
+        if (data.conversationId) {
+          setConversationId(data.conversationId)
+        }
+      },
+
+      onError: (error) => {
+        setMessages((prev) => {
+          const updated = [...prev]
+          const lastMsg = updated[updated.length - 1]
+          updated[updated.length - 1] = {
+            ...lastMsg,
+            text: `Sorry, I encountered an error: ${error}. Please check that the backend server and Ollama are running.`,
+          }
+          return updated
+        })
+      },
+    })
+
+    setIsStreaming(false)
   }
 
   // Handle file attachment
@@ -753,15 +781,19 @@ function ChatView() {
                 </div>
                 <button
                   onClick={handleSendMessage}
-                  disabled={!inputText.trim()}
+                  disabled={!inputText.trim() || isStreaming}
                   className={`inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none h-full ${
-                    inputText.trim()
+                    inputText.trim() && !isStreaming
                       ? "bg-teal-700 hover:bg-teal-600 text-white"
                       : "bg-gray-200 text-gray-400 cursor-not-allowed"
                   }`}
                   aria-label="Send message"
                 >
-                  <Send size={18} />
+                  {isStreaming ? (
+                    <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Send size={18} />
+                  )}
                 </button>
               </div>
             )}

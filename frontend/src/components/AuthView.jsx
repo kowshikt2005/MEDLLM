@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Stethoscope, User } from "lucide-react"
+import { api } from "../services/api"
 
 // Simple utility to join class names, replacing cn
 const classNames = (...classes) => classes.filter(Boolean).join(" ")
@@ -109,14 +110,37 @@ export default function AuthView({ onLogin = () => {} }) {
     return isValid
   }
 
-  const handleSubmit = (e) => {
-    e.preventDefault()
+  const [isLoading, setIsLoading] = useState(false)
+  const [serverError, setServerError] = useState("")
 
-    if (validateForm()) {
-      console.log("Form submitted successfully", formData)
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setServerError("")
+
+    if (!validateForm()) return
+
+    setIsLoading(true)
+
+    try {
+      if (activeTab === "login") {
+        // Call the real backend login endpoint
+        await api.login(formData.email, formData.password)
+      } else {
+        // Call the real backend signup endpoint
+        await api.signup(
+          formData.email,
+          formData.password,
+          formData.fullName,
+          formData.phoneNumber || null
+        )
+      }
+      // If we get here, login/signup succeeded — token is stored in localStorage
       onLogin()
-    } else {
-      console.log("Form has errors", errors)
+    } catch (error) {
+      // Show the error message from the backend (e.g., "Email already registered")
+      setServerError(error.message)
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -256,19 +280,25 @@ export default function AuthView({ onLogin = () => {} }) {
                       )}
                     </div>
 
+                    {serverError && (
+                      <p className="text-red-500 text-sm bg-red-50 p-3 rounded-lg">{serverError}</p>
+                    )}
+
                     <div className="flex space-x-4 mt-6">
                       <button
                         type="button"
                         onClick={() => switchTab("login")}
                         className="flex-1 py-3 border border-[#4f8684] text-[#4f8684] font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                        disabled={isLoading}
                       >
                         LOG IN
                       </button>
                       <button
                         type="submit"
-                        className="flex-1 bg-[#0f1c1b] text-white py-3 rounded-lg font-medium hover:bg-[#1a2e2d] transition-colors"
+                        className="flex-1 bg-[#0f1c1b] text-white py-3 rounded-lg font-medium hover:bg-[#1a2e2d] transition-colors disabled:opacity-50"
+                        disabled={isLoading}
                       >
-                        SIGN UP
+                        {isLoading ? "SIGNING UP..." : "SIGN UP"}
                       </button>
                     </div>
                   </form>
@@ -359,11 +389,16 @@ export default function AuthView({ onLogin = () => {} }) {
                       {errors.password && touched.password && <p className="text-red-500 text-sm">{errors.password}</p>}
                     </div>
 
+                    {serverError && (
+                      <p className="text-red-500 text-sm bg-red-50 p-3 rounded-lg">{serverError}</p>
+                    )}
+
                     <button
                       type="submit"
-                      className="w-full bg-[#0f1c1b] text-white py-3 rounded-lg font-medium hover:bg-[#1a2e2d] transition-colors"
+                      className="w-full bg-[#0f1c1b] text-white py-3 rounded-lg font-medium hover:bg-[#1a2e2d] transition-colors disabled:opacity-50"
+                      disabled={isLoading}
                     >
-                      LOG IN
+                      {isLoading ? "LOGGING IN..." : "LOG IN"}
                     </button>
                   </form>
                 </div>

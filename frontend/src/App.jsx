@@ -6,13 +6,21 @@ import Dashboard from './components/Dashboard';
 import HomePage from './components/HomePage';
 import UserProfile from './components/UserProfile';
 import ChatView from './components/ChatView';
+import { api } from './services/api';
 import './index.css';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // Check if user is already logged in (token exists in localStorage)
+  // This means refreshing the page won't log you out
+  const [isAuthenticated, setIsAuthenticated] = useState(api.isLoggedIn());
 
   const handleLogin = () => {
     setIsAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    api.logout();
+    setIsAuthenticated(false);
   };
 
   if (!isAuthenticated) {
