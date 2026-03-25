@@ -214,6 +214,72 @@ async function chatStream(message, options = {}) {
 }
 
 // ═══════════════════════════════════════════════════════
+// FILE UPLOAD (Phase 2)
+// ═══════════════════════════════════════════════════════
+
+/**
+ * Upload a file for processing (PDF, DOCX, image, text).
+ *
+ * This is called immediately when the user selects a file (not when they
+ * send the message). The backend extracts text from the file and returns
+ * an upload_id that we include with the chat message later.
+ *
+ * Uses FormData instead of JSON because we're sending a binary file.
+ *
+ * @param {File} file - The file object from the file input
+ * @returns {Promise<object>} - { upload_id, filename, file_type, extracted_text }
+ */
+async function uploadFile(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const token = getToken();
+  const headers = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  // Note: do NOT set Content-Type header — browser sets it automatically
+  // with the correct multipart boundary when using FormData
+
+  const response = await fetch(`${API_BASE}/upload`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  return handleResponse(response);
+}
+
+/**
+ * Send recorded audio for speech-to-text transcription.
+ *
+ * The browser records audio as a WebM blob. We send it to the backend
+ * where Whisper transcribes it to text. The transcribed text is then
+ * placed in the chat input for the user to review before sending.
+ *
+ * @param {Blob} audioBlob - The recorded audio blob from MediaRecorder
+ * @returns {Promise<object>} - { text, language }
+ */
+async function transcribeAudio(audioBlob) {
+  const formData = new FormData();
+  formData.append('file', audioBlob, 'recording.webm');
+
+  const token = getToken();
+  const headers = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE}/transcribe`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  return handleResponse(response);
+}
+
+// ═══════════════════════════════════════════════════════
 // HEALTH CHECK
 // ═══════════════════════════════════════════════════════
 
@@ -237,6 +303,10 @@ export const api = {
 
   // Chat
   chatStream,
+
+  // File upload & transcription (Phase 2)
+  uploadFile,
+  transcribeAudio,
 
   // System
   healthCheck,

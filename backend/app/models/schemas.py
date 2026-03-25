@@ -119,3 +119,9 @@ class UploadResponse(BaseModel):
     file_type: str
     extracted_text: str
     preview_url: str | None = None
+
+
+class TranscriptionResponse(BaseModel):
+    """What the backend returns after transcribing audio."""
+    text: str
+    language: str | None = None

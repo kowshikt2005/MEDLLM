@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.models.database import init_db
-from app.routers import auth, chat
+from app.routers import auth, chat, upload, transcribe
 
 
 # ── Lifespan event ──────────────────────────────────────
@@ -82,8 +82,10 @@ app.add_middleware(
 # ── Register routers ────────────────────────────────────
 # Each router handles a group of related endpoints.
 # The prefix in each router determines the URL path.
-app.include_router(auth.router)    # /api/auth/signup, /api/auth/login
-app.include_router(chat.router)    # /api/chat
+app.include_router(auth.router)         # /api/auth/signup, /api/auth/login
+app.include_router(chat.router)         # /api/chat
+app.include_router(upload.router)       # /api/upload
+app.include_router(transcribe.router)   # /api/transcribe
 
 
 # ── Health check endpoint ───────────────────────────────

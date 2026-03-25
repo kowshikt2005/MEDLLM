@@ -16,13 +16,16 @@ SSE event format (what the browser receives):
   data: {"type": "done", "content": "", "conversation_id": "abc-123"}
 """
 
+import base64
 import json
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.models.database import Conversation, Message, get_db
+from app.config import settings
+from app.models.database import Attachment, Conversation, Message, get_db
 from app.models.schemas import ChatRequest
 from app.services.llm_service import llm_service
 
@@ -84,16 +87,75 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         db.add(user_message)
         await db.commit()
 
-        # ── Step 3: Build conversation history for the LLM ──
+        # ── Step 3: Process attachments ──────────────────
+        # If the user included file attachments, look them up, link them
+        # to this message, and build context from their extracted text.
+        attachment_context = ""
+        image_descriptions = []
+
+        if request.attachments:
+            # Fetch all referenced attachments from the database
+            result = await db.execute(
+                select(Attachment).where(Attachment.id.in_(request.attachments))
+            )
+            attachments = result.scalars().all()
+
+            for attachment in attachments:
+                # Link attachment to this message (was null until now)
+                attachment.message_id = user_message.id
+
+                # Build context from extracted text
+                if attachment.extracted_text:
+                    attachment_context += (
+                        f"\n\n--- Attached file: {attachment.filename} ---\n"
+                        f"{attachment.extracted_text}\n"
+                        f"--- End of {attachment.filename} ---\n"
+                    )
+
+                # For images, also get a vision description from moondream
+                if attachment.file_type == "image":
+                    try:
+                        import ollama as ollama_client
+
+                        with open(attachment.file_path, "rb") as img_file:
+                            img_b64 = base64.b64encode(img_file.read()).decode()
+
+                        vision_response = ollama_client.chat(
+                            model="moondream",
+                            messages=[{
+                                "role": "user",
+                                "content": "Describe this image in detail. What do you see?",
+                                "images": [img_b64],
+                            }],
+                        )
+                        description = vision_response["message"]["content"]
+                        image_descriptions.append(
+                            f"\n[Visual analysis of {attachment.filename}]: {description}"
+                        )
+                    except Exception as e:
+                        image_descriptions.append(
+                            f"\n[Could not analyze image {attachment.filename}: {e}]"
+                        )
+
+            await db.commit()
+
+        # ── Step 4: Build conversation history for the LLM ──
         # The LLM needs to see previous messages to maintain context.
         # We format them as [{"role": "user", "content": "..."}, ...]
         messages = [{"role": "user", "content": request.message}]
 
         # TODO (Phase 3): Add RAG context here
         # TODO (Phase 4): Handle reasoning mode here
-        system_prompt = SYSTEM_PROMPT
 
-        # ── Step 4: Stream tokens from Ollama ────────────
+        # Build system prompt with attachment context
+        system_prompt = SYSTEM_PROMPT
+        if attachment_context or image_descriptions:
+            system_prompt += "\n\nThe user has attached the following files. Use this content to answer their question:"
+            system_prompt += attachment_context
+            for desc in image_descriptions:
+                system_prompt += desc
+
+        # ── Step 5: Stream tokens from Ollama ────────────
         full_response = ""
 
         async for token in llm_service.chat_stream(messages, system_prompt):
@@ -102,7 +164,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
             # Send each token as an SSE event
             yield json.dumps({"type": "token", "content": token})
 
-        # ── Step 5: Save assistant's full response ───────
+        # ── Step 6: Save assistant's full response ───────
         assistant_message = Message(
             conversation_id=conversation_id,
             role="assistant",
@@ -111,7 +173,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         db.add(assistant_message)
         await db.commit()
 
-        # ── Step 6: Send "done" event ────────────────────
+        # ── Step 7: Send "done" event ────────────────────
         yield json.dumps({
             "type": "done",
             "content": "",

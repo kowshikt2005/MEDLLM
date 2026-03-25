@@ -146,7 +146,7 @@ class Attachment(Base):
     __tablename__ = "attachments"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    message_id = Column(String, ForeignKey("messages.id"), nullable=False)
+    message_id = Column(String, ForeignKey("messages.id"), nullable=True)  # Null until message is sent
     filename = Column(String, nullable=False)
     file_type = Column(String, nullable=False)  # "pdf", "image", "docx", etc.
     file_path = Column(String, nullable=False)  # Where it's stored on disk

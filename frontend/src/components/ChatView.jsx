@@ -23,6 +23,7 @@ import {
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import { api } from "../services/api"
+import FilePreview from "./FilePreview"
 
 // Simple tooltip implementation
 const Tooltip = ({ children, content }) => {
@@ -64,6 +65,8 @@ function ChatView() {
   const [recordingTime, setRecordingTime] = useState(0)
   const [audioLevels, setAudioLevels] = useState([0.1, 0.2, 0.1, 0.3, 0.2, 0.1])
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null)
+  const [attachments, setAttachments] = useState([])  // [{id, filename, fileType, status}]
+  const [isTranscribing, setIsTranscribing] = useState(false)
 
   const dropdownRef = useRef(null)
   const chatContainerRef = useRef(null)
@@ -219,10 +222,19 @@ function ChatView() {
     }
     setMessages((prev) => [...prev, assistantMessage])
 
+    // Collect attachment IDs that are done uploading
+    const attachmentIds = attachments
+      .filter((att) => att.status === "done")
+      .map((att) => att.id)
+
+    // Clear attachments from UI (they're now linked to this message)
+    setAttachments([])
+
     // Call the real streaming API
     const result = await api.chatStream(userText, {
       conversationId,
       mode: "normal",
+      attachments: attachmentIds,
 
       // This callback runs for EACH token the LLM generates.
       // We update the last message (the assistant's) by appending the token.
@@ -263,13 +275,45 @@ function ChatView() {
     fileInputRef.current.click()
   }
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const files = e.target.files
-    if (files.length > 0) {
-      console.log("Files selected:", files)
-      // Handle file upload logic here
-      alert(`File "${files[0].name}" selected. Upload functionality will be implemented.`)
+    if (files.length === 0) return
+
+    // Upload each selected file to the backend immediately
+    for (const file of files) {
+      // Add a placeholder entry with "uploading" status
+      const tempId = `temp-${Date.now()}-${file.name}`
+      const placeholder = { id: tempId, filename: file.name, fileType: "unknown", status: "uploading" }
+      setAttachments((prev) => [...prev, placeholder])
+
+      try {
+        // Send file to backend — extraction happens server-side
+        const result = await api.uploadFile(file)
+
+        // Replace placeholder with real data
+        setAttachments((prev) =>
+          prev.map((att) =>
+            att.id === tempId
+              ? { id: result.upload_id, filename: result.filename, fileType: result.file_type, status: "done" }
+              : att
+          )
+        )
+      } catch (error) {
+        // Mark as failed
+        setAttachments((prev) =>
+          prev.map((att) => (att.id === tempId ? { ...att, status: "error" } : att))
+        )
+        console.error("Upload failed:", error)
+      }
     }
+
+    // Reset file input so the same file can be selected again
+    e.target.value = ""
+  }
+
+  // Remove an attachment from the list
+  const handleRemoveAttachment = (index) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index))
   }
 
   // Handle feedback (e.g., thumbs up/down)
@@ -345,28 +389,32 @@ function ChatView() {
         }
       }
 
-      // Handle recording stop event
-      mediaRecorder.onstop = () => {
+      // Handle recording stop event — send audio to Whisper for transcription
+      mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" })
         setAudioBlob(audioBlob)
 
-        // Here you would typically send the audio to a speech-to-text service
-        console.log("Recording stopped, audio blob created:", audioBlob)
-
-        // Simulate processing the audio and getting a response
-        setInputText("I need information about Medicare coverage for prescription medications.")
-
-        // Clean up
+        // Clean up mic and timers
         if (micStreamRef.current) {
           micStreamRef.current.getTracks().forEach((track) => track.stop())
         }
-
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current)
         }
-
         if (timerRef.current) {
           clearInterval(timerRef.current)
+        }
+
+        // Send audio to backend for real Whisper transcription
+        setIsTranscribing(true)
+        try {
+          const result = await api.transcribeAudio(audioBlob)
+          setInputText(result.text)
+        } catch (error) {
+          console.error("Transcription failed:", error)
+          setInputText("[Transcription failed — please type your message]")
+        } finally {
+          setIsTranscribing(false)
         }
       }
 
@@ -748,7 +796,17 @@ function ChatView() {
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
+              <>
+                {/* Transcription loading indicator */}
+                {isTranscribing && (
+                  <div className="flex items-center gap-2 px-3 py-2 mb-2 bg-teal-50 border border-teal-200 rounded-lg text-sm text-teal-700">
+                    <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+                    Transcribing audio...
+                  </div>
+                )}
+                {/* File attachment previews */}
+                <FilePreview attachments={attachments} onRemove={handleRemoveAttachment} />
+                <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
                 <textarea
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
@@ -758,7 +816,14 @@ function ChatView() {
                   rows="2"
                 />
                 <div className="flex flex-col gap-2">
-                  <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" multiple />
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    className="hidden"
+                    multiple
+                    accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.bmp,.tiff,.webp,.txt,.csv,.md"
+                  />
                   <Tooltip content="Attach file">
                     <button
                       onClick={handleAttachment}
@@ -796,6 +861,7 @@ function ChatView() {
                   )}
                 </button>
               </div>
+              </>
             )}
           </div>
         </div>
