@@ -20,10 +20,14 @@ import {
   Pause,
   Play,
   Trash,
+  Brain,
+  Zap,
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import { api } from "../services/api"
 import FilePreview from "./FilePreview"
+import SourceCitations from "./SourceCitations"
+import ReasoningSteps from "./ReasoningSteps"
 
 // Simple tooltip implementation
 const Tooltip = ({ children, content }) => {
@@ -55,6 +59,9 @@ function ChatView() {
       sender: "MedLLM Assistant",
       text: "Hello! I'm MedLLM, your medical AI assistant. How can I help you with your healthcare questions today?",
       date: currentDate,
+      sources: [],          // Phase 3: RAG source citations
+      reasoningSteps: [],   // Phase 4: agentic reasoning step log
+      isComplete: true,     // Phase 4: true once streaming is done (for ReasoningSteps)
     },
   ])
   const [inputText, setInputText] = useState("")
@@ -67,6 +74,7 @@ function ChatView() {
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null)
   const [attachments, setAttachments] = useState([])  // [{id, filename, fileType, status}]
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [chatMode, setChatMode] = useState("normal")  // "normal" | "reasoning"
 
   const dropdownRef = useRef(null)
   const chatContainerRef = useRef(null)
@@ -214,11 +222,16 @@ function ChatView() {
     setInputText("")
     setIsStreaming(true)
 
-    // Add an empty assistant message that we'll fill token by token
+    // Add an empty assistant message that we'll fill in as events arrive.
+    // reasoningSteps fills via onStep; sources fills via onDone; isComplete
+    // flips to true when streaming finishes (so ReasoningSteps knows to collapse).
     const assistantMessage = {
       sender: "MedLLM Assistant",
       text: "",
       date: new Date().toLocaleString(),
+      sources: [],
+      reasoningSteps: [],
+      isComplete: false,
     }
     setMessages((prev) => [...prev, assistantMessage])
 
@@ -233,11 +246,10 @@ function ChatView() {
     // Call the real streaming API
     const result = await api.chatStream(userText, {
       conversationId,
-      mode: "normal",
+      mode: chatMode,         // "normal" or "reasoning" — from toggle button
       attachments: attachmentIds,
 
-      // This callback runs for EACH token the LLM generates.
-      // We update the last message (the assistant's) by appending the token.
+      // Called for each LLM token — append to the last message's text
       onToken: (token) => {
         setMessages((prev) => {
           const updated = [...prev]
@@ -247,11 +259,33 @@ function ChatView() {
         })
       },
 
+      // Phase 4: called for each reasoning step event from the backend.
+      // Appends the step string to the last message's reasoningSteps array.
+      onStep: (stepText) => {
+        setMessages((prev) => {
+          const updated = [...prev]
+          const lastMsg = updated[updated.length - 1]
+          updated[updated.length - 1] = {
+            ...lastMsg,
+            reasoningSteps: [...lastMsg.reasoningSteps, stepText],
+          }
+          return updated
+        })
+      },
+
+      // Called once when streaming finishes — attach sources and mark complete
       onDone: (data) => {
-        // Save the conversation ID so follow-up messages go to the same conversation
-        if (data.conversationId) {
-          setConversationId(data.conversationId)
-        }
+        if (data.conversationId) setConversationId(data.conversationId)
+        setMessages((prev) => {
+          const updated = [...prev]
+          const lastMsg = updated[updated.length - 1]
+          updated[updated.length - 1] = {
+            ...lastMsg,
+            sources: data.sources || [],
+            isComplete: true,   // tells ReasoningSteps to start collapse timer
+          }
+          return updated
+        })
       },
 
       onError: (error) => {
@@ -261,6 +295,7 @@ function ChatView() {
           updated[updated.length - 1] = {
             ...lastMsg,
             text: `Sorry, I encountered an error: ${error}. Please check that the backend server and Ollama are running.`,
+            isComplete: true,
           }
           return updated
         })
@@ -667,7 +702,20 @@ function ChatView() {
                         : "bg-white border-gray-200 text-gray-800"
                     } border rounded-lg p-4 shadow-sm relative group`}
                   >
+                    {/* Phase 4: live reasoning steps (only on assistant messages) */}
+                    {message.sender !== "User" && message.reasoningSteps?.length > 0 && (
+                      <ReasoningSteps
+                        steps={message.reasoningSteps}
+                        isComplete={message.isComplete}
+                      />
+                    )}
+
                     <p>{message.text}</p>
+
+                    {/* Phase 3: source citations from RAG retrieval */}
+                    {message.sender !== "User" && (
+                      <SourceCitations sources={message.sources} />
+                    )}
 
                     {/* Copy button - visible on hover */}
                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -841,6 +889,21 @@ function ChatView() {
                       aria-label="Record voice message"
                     >
                       <Mic size={18} />
+                    </button>
+                  </Tooltip>
+
+                  {/* Phase 4: Mode toggle — Normal vs Reasoning */}
+                  <Tooltip content={chatMode === "reasoning" ? "Switch to Normal mode" : "Switch to Reasoning mode (slower, more thorough)"}>
+                    <button
+                      onClick={() => setChatMode((m) => m === "normal" ? "reasoning" : "normal")}
+                      className={`inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none h-10 w-10 border ${
+                        chatMode === "reasoning"
+                          ? "bg-purple-100 hover:bg-purple-200 border-purple-300 text-purple-700"
+                          : "bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-500"
+                      }`}
+                      aria-label="Toggle reasoning mode"
+                    >
+                      <Brain size={18} />
                     </button>
                   </Tooltip>
                 </div>

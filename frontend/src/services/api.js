@@ -197,7 +197,13 @@ async function chatStream(message, options = {}) {
               onStep(data.content);
             } else if (data.type === 'done') {
               resultConversationId = data.conversation_id;
-              onDone({ conversationId: data.conversation_id, fullResponse });
+              // Phase 3: sources is a list like [{ source: "diabetes_guide.txt", score: 0.87 }]
+              // It's empty [] when the knowledge base has no relevant results.
+              onDone({
+                conversationId: data.conversation_id,
+                fullResponse,
+                sources: data.sources || [],
+              });
             }
           } catch {
             // Skip malformed JSON (can happen with partial chunks)
