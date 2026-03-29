@@ -323,3 +323,203 @@ ollama serve   # if not already running as a service
 - [ ] Transcription failure message appears if backend is unreachable
 
 **Phase 2 — COMPLETE**
+
+---
+
+## Phase 3: RAG Pipeline
+
+### Date: 2026-03-27
+
+### What Was Done
+
+Added a full Retrieval-Augmented Generation (RAG) pipeline to MedLLM. The LLM now searches a persistent medical knowledge base before every response and cites specific source documents in its answers. Source citations appear as color-coded chips below each assistant message in the UI.
+
+---
+
+### Design Decisions
+
+**1. Separate embedding service (`embedding_service.py`)**
+The sentence-transformers model is isolated in its own module with lazy loading — it loads on the first chat request, not at server startup. This keeps uvicorn startup fast. After first load, the model stays in memory for all subsequent requests (module-level singleton pattern).
+
+**2. ChromaDB with `upsert` instead of `add`**
+`collection.add()` throws `DuplicateIDError` if the same chunk IDs are ingested twice. Using `collection.upsert()` makes re-running the ingestion script safe — it adds new docs and updates existing ones without crashing.
+
+**3. Similarity threshold at 0.6**
+ChromaDB returns cosine distances in range [0, 2]. We convert with `similarity = 1 - (dist / 2)`. A threshold of 0.6 ensures only genuinely relevant chunks are injected. The original threshold of 0.3 was a bug — it would have included chunks with negative cosine similarity (semantically opposite content).
+
+**4. System prompt assembled by `prompts/medical.py`**
+The hardcoded `SYSTEM_PROMPT` string in `chat.py` was replaced with a `build_system_prompt()` function. It assembles the final prompt from three layers: base persona, RAG context, and uploaded file content (Phase 2). Keeping prompt logic in `prompts/medical.py` makes iteration easy without touching router code.
+
+**5. Sources sent in the SSE `done` event**
+Source citations (filename + similarity score) are added to the final `{"type": "done", ...}` event. The frontend stores them per message and renders `SourceCitations.jsx` chips below each assistant reply. Source chip color reflects confidence: teal ≥70%, blue ≥50%, gray <50%.
+
+**6. Two sample knowledge base files included**
+`data/knowledge_base/diabetes_guide.txt` and `hypertension_guide.txt` are factual medical reference documents included so RAG works immediately after running the ingestion script. Users can drop in additional PDFs, DOCXs, or TXTs to expand the knowledge base.
+
+---
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `backend/app/services/embedding_service.py` | Lazy-loads `all-MiniLM-L6-v2` (80MB, CPU-only). `embed_texts()` for batch indexing, `embed_query()` for single query at chat time |
+| `backend/app/services/rag_service.py` | ChromaDB wrapper. `add_documents()` (ingestion), `search()` (query time), `collection_size()`, `delete_collection()` |
+| `backend/app/prompts/medical.py` | `BASE_SYSTEM_PROMPT`, `RAG_CONTEXT_TEMPLATE`, and `build_system_prompt()` which assembles all prompt layers |
+| `backend/scripts/ingest_knowledge_base.py` | Standalone script: reads `data/knowledge_base/`, chunks (500 chars, 100 overlap), embeds, stores in ChromaDB. Run once before starting server |
+| `backend/data/knowledge_base/diabetes_guide.txt` | Sample: comprehensive diabetes reference (types, symptoms, diagnosis, treatment) |
+| `backend/data/knowledge_base/hypertension_guide.txt` | Sample: comprehensive hypertension reference (classification, risk factors, medications) |
+| `frontend/src/components/SourceCitations.jsx` | Renders source citation chips below assistant messages. Color-coded by relevance score. Returns null if no sources |
+
+---
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `backend/requirements.txt` | Uncommented `chromadb>=0.5.5` and `sentence-transformers>=3.0.1` |
+| `backend/app/routers/chat.py` | Added Step 4 (RAG retrieval via `rag_service.search()`); replaced hardcoded `SYSTEM_PROMPT` with `build_system_prompt()`; added `sources` list to the done SSE event |
+| `frontend/src/services/api.js` | `onDone` callback now receives `sources: data.sources \|\| []` from the done event |
+| `frontend/src/components/ChatView.jsx` | Messages include `sources: []` field; `onDone` updates last message sources; `SourceCitations` imported and rendered below assistant messages |
+
+---
+
+### Bugs Found & Fixed During Audit
+
+1. **`rag_service.py` — `from chromadb.config import Settings`** was deprecated in chromadb 0.5.x. Removed entirely. `PersistentClient` works without custom settings.
+
+2. **`rag_service.py` — similarity threshold was 0.3, should be 0.6.** With formula `1 - (dist/2)`, threshold 0.3 means cosine_similarity > −0.4 (negative! includes semantically opposite content). Fixed to 0.6, meaning cosine_similarity > 0.2.
+
+3. **`rag_service.py` — `collection.add()` → `collection.upsert()`.** `add()` throws `DuplicateIDError` on re-ingestion. `upsert()` is idempotent.
+
+---
+
+### How to Run (Phase 3)
+
+**One-time setup — build the knowledge base index:**
+```bash
+cd backend
+venv\Scripts\activate
+pip install chromadb sentence-transformers
+python scripts/ingest_knowledge_base.py
+```
+
+**Backend:**
+```bash
+uvicorn app.main:app --reload
+```
+
+**Frontend:**
+```bash
+cd frontend
+npm run dev
+```
+
+**Ollama (must be running):**
+```bash
+ollama serve
+```
+
+**Verification checklist:**
+- [x] Ask "What are the symptoms of diabetes?" → LLM answers correctly → `diabetes_guide` source chip appears
+- [x] Ask "What blood pressure is Stage 2 hypertension?" → exact mmHg numbers cited → `hypertension_guide` chip appears
+- [x] Ask "What is the capital of France?" → LLM answers → no source chips (off-topic, score < 0.6 threshold)
+- [x] Ask "Can diabetes cause high blood pressure?" → both source chips may appear (cross-topic)
+
+**Phase 3 — COMPLETE**
+
+---
+
+## Phase 4: Reasoning / Agent Mode
+
+### Date: 2026-03-27
+
+### What Was Done
+
+Added an agentic reasoning pipeline behind a toggle button in the chat UI. When activated, a Groq-hosted LLaMA 70B model acts as an orchestrator — it breaks the user's question into sub-questions, uses RAG + local Mistral to research each one, then synthesizes a comprehensive final answer. The reasoning steps stream live to the browser in a collapsible panel above the response.
+
+---
+
+### Design Decisions
+
+**1. Two-model architecture: Groq 70B orchestrates, Mistral 7B researches**
+Mistral 7B handles focused sub-questions well when given RAG context. Groq's 70B is reserved for planning (where logical decomposition matters) and synthesis (where coherent long-form writing matters). This gives better results than either model alone, while keeping sub-question answering local and private.
+
+**2. `_sources` sentinel event pattern**
+`reasoning_service.py` is a pure async generator — Python async generators cannot `return` values. To pass sources back to `chat.py`, the service yields a special `{"type": "_sources", "content": [...]}` event last. `chat.py` intercepts it, strips it from the SSE stream, and includes it in the `done` event. The browser never sees `_sources`.
+
+**3. Groq streaming uses async context manager**
+The synthesis step uses `async with client.chat.completions.stream(...) as stream:` instead of `await client.chat.completions.create(..., stream=True)`. The context manager form guarantees the HTTP connection closes cleanly even if an exception occurs mid-stream — fixes a resource leak in groq SDK >= 0.13.
+
+**4. Graceful fallback when no Groq API key**
+If `GROQ_API_KEY` is not set in `.env`, `chat.py` detects this and falls back to normal mode. A `step` event is sent to the browser explaining the fallback. The app never crashes — Groq is optional.
+
+**5. `ReasoningSteps` auto-collapses after completion**
+The panel starts expanded while steps stream in. When `isComplete` flips to `true` (on the `done` event), a 1.2s `setTimeout` collapses it automatically. The user sees all steps complete, then the panel folds away so the final answer has full focus. The `clearTimeout` cleanup in `useEffect` prevents state updates on unmounted components.
+
+**6. Mode persists per session via React state**
+`chatMode` is stored in `ChatView` state — not per-message. This means the user sets it once and all subsequent messages in that session use the same mode. The mode is reset to `"normal"` on page reload (intentional — reasoning mode is opt-in).
+
+---
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `backend/app/services/reasoning_service.py` | Full agentic pipeline. `reason_stream()` yields step/token/`_sources` events. Accepts `attachment_context` and `image_descriptions` so uploaded files work in reasoning mode |
+| `frontend/src/components/ReasoningSteps.jsx` | Collapsible reasoning step panel. Spinner on current step, checkmarks on completed steps, auto-collapses 1.2s after `isComplete=true` |
+
+---
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `backend/requirements.txt` | Uncommented `groq>=0.11.0` |
+| `backend/app/config.py` | `groq_model` default changed from `llama-3.1-70b-versatile` (decommissioned) to `llama-3.3-70b-versatile` |
+| `backend/app/routers/chat.py` | Routes to `reason_stream()` when `mode=="reasoning"` and key is set; intercepts `_sources` sentinel; passes `attachment_context` + `image_descriptions` to reasoning service |
+| `frontend/src/components/ChatView.jsx` | Added `chatMode` state, `Brain` icon toggle button (purple when active), `onStep` callback, `reasoningSteps`/`isComplete` fields per message, `ReasoningSteps` rendered above message text |
+
+---
+
+### Bugs Found & Fixed During Audit
+
+1. **`reasoning_service.py` — attachments silently ignored in reasoning mode.** `reason_stream()` only accepted `query: str` — uploaded PDFs/images were processed and DB-linked but never reached the LLM. Fixed by adding `attachment_context` and `image_descriptions` parameters and passing them through to every `build_system_prompt()` call in the research loop.
+
+2. **`reasoning_service.py` — planning exception swallowed silently.** `except Exception as e` caught the error but never logged `e`. Rate limit errors and network failures were invisible. Fixed by adding `print(f"[Reasoning] Planning step failed: {type(e).__name__}: {e}")`.
+
+3. **`reasoning_service.py` — Groq streaming without context manager.** `await client.chat.completions.create(..., stream=True)` doesn't guarantee connection cleanup on error in groq >= 0.13. Switched to `async with client.chat.completions.stream(...) as stream:`.
+
+4. **`backend/app/config.py` — Groq model decommissioned.** `llama-3.1-70b-versatile` was retired by Groq. Updated to `llama-3.3-70b-versatile`.
+
+---
+
+### How to Run (Phase 4)
+
+**One-time setup — get a free Groq API key:**
+```
+1. Go to console.groq.com (no credit card required)
+2. Create an API key
+3. Add to backend/.env:  GROQ_API_KEY=gsk_your_key_here
+```
+
+**Install new package:**
+```bash
+cd backend && pip install groq
+```
+
+**Start everything as usual:**
+```bash
+uvicorn app.main:app --reload   # backend
+npm run dev                      # frontend
+ollama serve                     # Ollama
+```
+
+**Verification checklist:**
+- [x] Click Brain icon → turns purple → send a message → reasoning steps appear live
+- [x] Ask "Can diabetes cause kidney disease?" → 3 sub-questions planned → researched → synthesized
+- [x] Source chips appear after reasoning completes
+- [x] Reasoning panel auto-collapses ~1.2s after final answer
+- [x] Click Brain icon again → back to normal mode → same question responds in ~10s with no steps
+- [x] Remove `GROQ_API_KEY` from `.env` → reasoning mode selected → step event explains fallback → normal answer returned
+
+**Phase 4 — COMPLETE**

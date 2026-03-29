@@ -2,18 +2,25 @@
 Chat router — the core endpoint that connects the frontend to the LLM.
 
 How streaming works end-to-end:
-  1. Browser sends POST /api/chat with {"message": "What is diabetes?"}
+  1. Browser sends POST /api/chat with {"message": "...", "mode": "normal"|"reasoning"}
   2. This endpoint creates an SSE (Server-Sent Events) response
-  3. For each token Ollama generates, we send an SSE event to the browser
-  4. The browser's ReadableStream reads each event and appends it to the UI
-  5. When done, we send a final "done" event
+  3. For each token/step the LLM generates, we send an SSE event to the browser
+  4. The browser's ReadableStream reads each event and updates the UI
+  5. When done, we send a final "done" event with conversation_id and sources
 
-SSE event format (what the browser receives):
-  data: {"type": "token", "content": "Diabetes"}
-  data: {"type": "token", "content": " is"}
-  data: {"type": "token", "content": " a"}
-  ...
-  data: {"type": "done", "content": "", "conversation_id": "abc-123"}
+SSE events sent to browser:
+  {"type": "step",  "content": "Analyzing question..."}         ← reasoning mode only
+  {"type": "token", "content": "Diabetes"}                      ← both modes
+  {"type": "done",  "content": "", "conversation_id": "abc",
+   "sources": [{"source": "diabetes_guide.txt", "score": 0.87}]}
+
+Internal-only events (never forwarded to browser):
+  {"type": "_sources", "content": [...]}  ← from reasoning_service, intercepted here
+
+Phase 4 additions:
+  - Reasoning mode: routes to reasoning_service.reason_stream() instead of llm_service
+  - Fallback: if mode="reasoning" but GROQ_API_KEY is not set, falls back to normal
+  - step events: forwarded to browser so UI can show live reasoning progress
 """
 
 import base64
@@ -27,48 +34,29 @@ from sse_starlette.sse import EventSourceResponse
 from app.config import settings
 from app.models.database import Attachment, Conversation, Message, get_db
 from app.models.schemas import ChatRequest
+from app.prompts.medical import build_system_prompt
+from app.services import rag_service, reasoning_service
 from app.services.llm_service import llm_service
 
 router = APIRouter(prefix="/api", tags=["chat"])
-
-# Default system prompt for Phase 1 (will be enhanced with RAG in Phase 3)
-SYSTEM_PROMPT = """You are MedLLM, a helpful and knowledgeable medical AI assistant.
-
-Guidelines:
-- Provide accurate, evidence-based medical information
-- Use clear, understandable language while maintaining medical accuracy
-- Always remind users to consult healthcare professionals for medical decisions
-- If you're unsure about something, say so rather than guessing
-- Structure your responses with headings and bullet points when appropriate
-
-IMPORTANT: You are an AI assistant, not a doctor. Always recommend professional medical consultation for diagnosis and treatment decisions."""
 
 
 @router.post("/chat")
 async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     """
-    Main chat endpoint. Accepts a message and streams back the LLM response.
+    Main chat endpoint. Streams back the LLM response as SSE events.
 
-    This returns an EventSourceResponse — a special HTTP response that keeps
-    the connection open and sends data as it becomes available (SSE).
-
-    The browser doesn't get one big response. Instead, it receives a stream
-    of small JSON events, each containing one token.
+    Two modes:
+      normal    — RAG + Mistral 7B directly (~10-20s)
+      reasoning — Groq plans → RAG + Mistral researches → Groq synthesizes (~30-45s)
     """
 
     async def event_generator():
-        """
-        This inner function is the actual generator that produces SSE events.
-        It runs asynchronously — FastAPI calls it and streams the results.
-        """
-        # ── Step 1: Create or load conversation ──────────
+
+        # ── Step 1: Create or load conversation ──────────────────────────
         conversation_id = request.conversation_id
 
         if not conversation_id:
-            # New conversation — create one
-            # Note: user_id is required by the database schema.
-            # For now, we use a placeholder. In Phase 6, we'll wire this
-            # to the authenticated user via get_current_user dependency.
             conversation = Conversation(
                 title=request.message[:50],
                 user_id="anonymous",
@@ -78,7 +66,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
             await db.refresh(conversation)
             conversation_id = conversation.id
 
-        # ── Step 2: Save the user's message to database ──
+        # ── Step 2: Save user message ─────────────────────────────────────
         user_message = Message(
             conversation_id=conversation_id,
             role="user",
@@ -87,24 +75,19 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         db.add(user_message)
         await db.commit()
 
-        # ── Step 3: Process attachments ──────────────────
-        # If the user included file attachments, look them up, link them
-        # to this message, and build context from their extracted text.
+        # ── Step 3: Process file attachments (Phase 2) ───────────────────
         attachment_context = ""
         image_descriptions = []
 
         if request.attachments:
-            # Fetch all referenced attachments from the database
             result = await db.execute(
                 select(Attachment).where(Attachment.id.in_(request.attachments))
             )
             attachments = result.scalars().all()
 
             for attachment in attachments:
-                # Link attachment to this message (was null until now)
                 attachment.message_id = user_message.id
 
-                # Build context from extracted text
                 if attachment.extracted_text:
                     attachment_context += (
                         f"\n\n--- Attached file: {attachment.filename} ---\n"
@@ -112,7 +95,6 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
                         f"--- End of {attachment.filename} ---\n"
                     )
 
-                # For images, also get a vision description from moondream
                 if attachment.file_type == "image":
                     try:
                         import ollama as ollama_client
@@ -139,32 +121,88 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
 
             await db.commit()
 
-        # ── Step 4: Build conversation history for the LLM ──
-        # The LLM needs to see previous messages to maintain context.
-        # We format them as [{"role": "user", "content": "..."}, ...]
-        messages = [{"role": "user", "content": request.message}]
+        # ── Step 4: Route to normal or reasoning mode ─────────────────────
+        #
+        # NORMAL MODE:
+        #   RAG search → build_system_prompt → llm_service.chat_stream()
+        #
+        # REASONING MODE:
+        #   reasoning_service.reason_stream() handles everything internally:
+        #   planning (Groq) → research (RAG + Mistral) → synthesis (Groq stream)
+        #
+        # FALLBACK:
+        #   If reasoning is requested but GROQ_API_KEY is not set in .env,
+        #   we fall back to normal mode with a notice step event.
+        #   The app never crashes — Groq is optional.
 
-        # TODO (Phase 3): Add RAG context here
-        # TODO (Phase 4): Handle reasoning mode here
+        use_reasoning = (
+            request.mode == "reasoning"
+            and bool(settings.groq_api_key)
+        )
 
-        # Build system prompt with attachment context
-        system_prompt = SYSTEM_PROMPT
-        if attachment_context or image_descriptions:
-            system_prompt += "\n\nThe user has attached the following files. Use this content to answer their question:"
-            system_prompt += attachment_context
-            for desc in image_descriptions:
-                system_prompt += desc
-
-        # ── Step 5: Stream tokens from Ollama ────────────
         full_response = ""
+        sources: list[dict] = []
 
-        async for token in llm_service.chat_stream(messages, system_prompt):
-            full_response += token
+        if use_reasoning:
+            # ── REASONING MODE ─────────────────────────────────────────────
+            print(f"[Chat] Reasoning mode for: {request.message[:60]}...")
 
-            # Send each token as an SSE event
-            yield json.dumps({"type": "token", "content": token})
+            async for event_json in reasoning_service.reason_stream(
+                request.message,
+                attachment_context=attachment_context,
+                image_descriptions=image_descriptions,
+            ):
+                data = json.loads(event_json)
 
-        # ── Step 6: Save assistant's full response ───────
+                if data["type"] == reasoning_service.SOURCES_SENTINEL:
+                    # Intercept sources — add to done event, don't send to browser
+                    sources = data["content"]
+
+                elif data["type"] == "token":
+                    # Accumulate full response for saving to DB
+                    full_response += data["content"]
+                    yield event_json
+
+                else:
+                    # step events — forward directly to browser
+                    yield event_json
+
+        else:
+            # ── NORMAL MODE ────────────────────────────────────────────────
+            if request.mode == "reasoning" and not settings.groq_api_key:
+                # Inform user why we're falling back
+                yield json.dumps({
+                    "type": "step",
+                    "content": "Groq API key not configured — using standard mode. Add GROQ_API_KEY to backend/.env to enable reasoning mode.",
+                })
+
+            # RAG retrieval
+            rag_sources = rag_service.search(request.message, n_results=3)
+
+            if rag_sources:
+                print(f"[RAG] {len(rag_sources)} chunk(s) found for: {request.message[:60]}...")
+            else:
+                print("[RAG] No relevant chunks found (knowledge base may be empty).")
+
+            # Build system prompt with RAG context + attachments
+            system_prompt = build_system_prompt(
+                rag_sources=rag_sources,
+                attachment_context=attachment_context,
+                image_descriptions=image_descriptions,
+            )
+
+            messages = [{"role": "user", "content": request.message}]
+
+            async for token in llm_service.chat_stream(messages, system_prompt):
+                full_response += token
+                yield json.dumps({"type": "token", "content": token})
+
+            sources = [
+                {"source": s["source"], "score": s["score"]}
+                for s in rag_sources
+            ]
+
+        # ── Step 5: Save assistant response to DB ─────────────────────────
         assistant_message = Message(
             conversation_id=conversation_id,
             role="assistant",
@@ -173,12 +211,12 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         db.add(assistant_message)
         await db.commit()
 
-        # ── Step 7: Send "done" event ────────────────────
+        # ── Step 6: Send done event with sources ──────────────────────────
         yield json.dumps({
             "type": "done",
             "content": "",
             "conversation_id": conversation_id,
+            "sources": sources,
         })
 
-    # Return an SSE response that streams the generator's output
     return EventSourceResponse(event_generator())

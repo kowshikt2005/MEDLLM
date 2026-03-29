@@ -109,11 +109,25 @@ npm run dev
 **4. Open the app:**
 Visit `http://localhost:5173`
 
+## Benchmarks
+
+Model accuracy on [MedQA USMLE](https://huggingface.co/datasets/GBaker/MedQA-USMLE-4-options) — 100-question random sample from the test split, temperature=0.
+
+| Model | Where it runs | MedQA Accuracy | Notes |
+|---|---|---|---|
+| Random guessing | — | 25.0% | 4-option baseline |
+| **Mistral-7B** (base) | Local via Ollama | **47.0%** | Pre fine-tune · 2026-03-29 |
+| **Mistral-7B (fine-tuned)** | Local via Ollama | _pending_ | After QLoRA on MedAlpaca |
+| Human passing threshold | — | ~60.0% | USMLE Step 1 pass mark |
+| **LLaMA-3.3-70B** | Groq cloud API | **75.0%** | 10× larger model · 2026-03-29 |
+
+> **Fine-tuning goal:** lift Mistral-7B from 47% toward the human passing threshold (~60%) using QLoRA on medical Q&A data — while keeping inference fully local and free.
+
 ## Implementation Phases
 
 - [x] **Phase 1** — Backend foundation + text chat with streaming
-- [ ] **Phase 2** — Multimodal input (PDF, image OCR, voice transcription)
-- [ ] **Phase 3** — RAG pipeline with ChromaDB
-- [ ] **Phase 4** — Reasoning / agent mode via free API (Groq/Gemini)
+- [x] **Phase 2** — Multimodal input (PDF, image OCR, voice transcription)
+- [x] **Phase 3** — RAG pipeline with ChromaDB
+- [x] **Phase 4** — Reasoning / agent mode via free API (Groq/Gemini)
 - [ ] **Phase 5** — QLoRA fine-tuning on medical data
 - [ ] **Phase 6** — Profile, history, polish, Docker deployment

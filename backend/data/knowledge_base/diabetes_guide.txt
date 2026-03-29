@@ -1,0 +1,93 @@
+DIABETES MELLITUS — COMPREHENSIVE MEDICAL REFERENCE
+
+DEFINITION
+Diabetes mellitus is a group of metabolic diseases characterized by chronic hyperglycemia (high blood glucose) resulting from defects in insulin secretion, insulin action, or both. The word "mellitus" comes from the Latin for "honey-sweet," referring to glucose in the urine.
+
+TYPES OF DIABETES
+
+Type 1 Diabetes (T1D)
+Type 1 diabetes is an autoimmune condition in which the body's immune system attacks and destroys the insulin-producing beta cells of the pancreas. As a result, the body produces little or no insulin. Type 1 accounts for approximately 5-10% of all diabetes cases. It can occur at any age but is most commonly diagnosed in children, adolescents, and young adults. Patients require lifelong insulin therapy.
+
+Type 2 Diabetes (T2D)
+Type 2 diabetes is the most common form, accounting for 90-95% of all cases. It is characterized by insulin resistance (cells do not respond normally to insulin) combined with relative insulin deficiency. Risk factors include obesity, physical inactivity, family history, age over 45, and prior gestational diabetes. Type 2 can often be managed initially with lifestyle changes and oral medications.
+
+Gestational Diabetes
+Gestational diabetes develops during pregnancy in women who did not previously have diabetes. It occurs due to hormonal changes that cause insulin resistance. It typically resolves after delivery but increases the risk of Type 2 diabetes later in life for both mother and child.
+
+Prediabetes
+Prediabetes is a condition where blood glucose levels are higher than normal but not yet high enough to be classified as Type 2 diabetes. Fasting glucose of 100-125 mg/dL or HbA1c of 5.7-6.4% indicates prediabetes.
+
+SYMPTOMS
+Common symptoms of uncontrolled diabetes include:
+- Polyuria: frequent urination, especially at night
+- Polydipsia: excessive thirst
+- Polyphagia: increased hunger despite eating
+- Unexplained weight loss (especially in Type 1)
+- Fatigue and weakness
+- Blurred vision
+- Slow-healing wounds or frequent infections
+- Tingling or numbness in hands and feet (neuropathy)
+- Darkened skin in armpits or neck (acanthosis nigricans, common in Type 2)
+
+Note: Type 2 diabetes often has no symptoms in early stages — many cases are detected through routine blood tests.
+
+DIAGNOSIS
+
+Standard diagnostic criteria (any ONE of the following):
+1. Fasting plasma glucose ≥ 126 mg/dL (7.0 mmol/L) — fasting = no caloric intake for at least 8 hours
+2. 2-hour plasma glucose ≥ 200 mg/dL (11.1 mmol/L) during an oral glucose tolerance test (OGTT)
+3. HbA1c ≥ 6.5% (48 mmol/mol)
+4. Random plasma glucose ≥ 200 mg/dL with classic hyperglycemic symptoms
+
+HbA1c (Glycated Hemoglobin)
+HbA1c reflects average blood glucose over the past 2-3 months by measuring the percentage of hemoglobin that is glycated. It is the gold standard for monitoring long-term glucose control. Target for most diabetic patients: < 7.0% (ADA guidelines), though targets are individualized.
+
+COMPLICATIONS
+
+Microvascular (small blood vessel) complications:
+- Diabetic retinopathy: damage to the retina, leading cause of blindness in working-age adults
+- Diabetic nephropathy: kidney damage, can progress to chronic kidney disease and dialysis
+- Diabetic neuropathy: nerve damage causing pain, numbness, or autonomic dysfunction
+
+Macrovascular (large blood vessel) complications:
+- Cardiovascular disease: 2-4x higher risk of heart attack and stroke
+- Peripheral artery disease: reduced blood flow to the legs
+- Cerebrovascular disease: increased stroke risk
+
+Other complications:
+- Diabetic foot: neuropathy + poor circulation → ulcers → amputation risk
+- Hyperosmolar hyperglycemic state (HHS): life-threatening, mainly in Type 2
+- Diabetic ketoacidosis (DKA): life-threatening, mainly in Type 1
+
+TREATMENT AND MANAGEMENT
+
+Lifestyle Modifications (first-line for Type 2):
+- Dietary changes: reduce refined carbohydrates, sugar, and saturated fats; increase fiber
+- Regular physical activity: 150 minutes/week of moderate exercise improves insulin sensitivity
+- Weight loss: even 5-10% body weight reduction significantly improves glucose control
+
+Medications for Type 2 Diabetes:
+- Metformin: first-line oral medication; reduces hepatic glucose production; well-tolerated
+- SGLT2 inhibitors (e.g., empagliflozin): reduce glucose by increasing urinary glucose excretion; also have cardiovascular and renal benefits
+- GLP-1 receptor agonists (e.g., semaglutide/Ozempic): enhance insulin secretion, reduce appetite, promote weight loss
+- DPP-4 inhibitors (e.g., sitagliptin): increase insulin secretion in a glucose-dependent manner
+- Sulfonylureas (e.g., glipizide): stimulate insulin secretion; risk of hypoglycemia
+- Insulin therapy: required for Type 1; also used in advanced Type 2
+
+Insulin Types and Timing:
+- Rapid-acting (e.g., lispro, aspart): onset 15 min, peak 1-2 hr — taken before meals
+- Short-acting (regular): onset 30-60 min — taken before meals
+- Intermediate-acting (NPH): onset 2-4 hr, peak 4-12 hr
+- Long-acting (e.g., glargine, detemir): onset 2-4 hr, no pronounced peak — once daily basal insulin
+
+Monitoring:
+- Self-monitoring of blood glucose (SMBG): finger-stick testing before/after meals
+- Continuous glucose monitoring (CGM): sensor worn on the skin, real-time readings every 5 minutes
+- HbA1c testing: every 3 months if uncontrolled, every 6 months if stable
+
+PREVENTION OF TYPE 2 DIABETES
+Studies show that diabetes prevention program (DPP) lifestyle interventions can reduce Type 2 onset by 58% in high-risk individuals. Key strategies:
+- Achieve and maintain healthy body weight
+- 150+ minutes of moderate physical activity per week
+- Healthy diet rich in whole grains, vegetables, legumes, and healthy fats
+- Avoid smoking and limit alcohol consumption

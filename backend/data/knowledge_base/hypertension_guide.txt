@@ -1,0 +1,147 @@
+HYPERTENSION (HIGH BLOOD PRESSURE) — COMPREHENSIVE MEDICAL REFERENCE
+
+DEFINITION
+Hypertension is a chronic medical condition defined as persistently elevated blood pressure in the arteries. Blood pressure is expressed as two values: systolic pressure (when the heart contracts) over diastolic pressure (when the heart relaxes). It is measured in millimeters of mercury (mmHg).
+
+Blood pressure classification (ACC/AHA 2017 guidelines):
+- Normal:          Systolic < 120 AND Diastolic < 80 mmHg
+- Elevated:        Systolic 120-129 AND Diastolic < 80 mmHg
+- Stage 1 HTN:     Systolic 130-139 OR Diastolic 80-89 mmHg
+- Stage 2 HTN:     Systolic ≥ 140 OR Diastolic ≥ 90 mmHg
+- Hypertensive crisis: Systolic > 180 AND/OR Diastolic > 120 mmHg — requires immediate medical attention
+
+PREVALENCE
+Hypertension affects approximately 1.28 billion adults worldwide (WHO, 2023), making it one of the most common chronic conditions. Only about 1 in 5 hypertensive adults have their condition under control. It is often called the "silent killer" because it typically has no symptoms until significant organ damage has occurred.
+
+TYPES OF HYPERTENSION
+
+Primary (Essential) Hypertension
+Accounts for 90-95% of hypertension cases. Has no single identifiable cause but results from a complex interplay of genetic, environmental, and lifestyle factors. It develops gradually over many years.
+
+Secondary Hypertension
+Accounts for 5-10% of cases. Caused by an identifiable underlying condition, including:
+- Chronic kidney disease (most common cause of secondary hypertension)
+- Primary aldosteronism (adrenal gland overproduces aldosterone)
+- Renal artery stenosis (narrowing of artery supplying the kidney)
+- Obstructive sleep apnea
+- Thyroid disorders (both hypothyroidism and hyperthyroidism)
+- Pheochromocytoma (rare adrenal tumor)
+- Certain medications: NSAIDs, oral contraceptives, decongestants, stimulants
+
+RISK FACTORS
+
+Non-modifiable risk factors:
+- Age: risk increases substantially after age 65
+- Family history: first-degree relative with hypertension
+- Race: higher prevalence and earlier onset in Black individuals
+- Sex: men more affected before age 55; women more affected after menopause
+
+Modifiable risk factors:
+- Obesity and overweight: excess weight increases cardiac workload
+- Physical inactivity: sedentary lifestyle elevates resting blood pressure
+- High dietary sodium: sodium causes water retention, increasing blood volume
+- Low dietary potassium: counterbalances sodium's effects on blood pressure
+- Excessive alcohol consumption: raises blood pressure directly
+- Smoking: causes acute blood pressure spikes and vascular damage
+- Chronic stress: activates the sympathetic nervous system
+- Diabetes: damages blood vessels, contributing to hypertension
+
+SYMPTOMS
+Most people with hypertension have NO symptoms — this is why regular screening is critical.
+
+Symptoms that may occur in severe or rapidly progressing hypertension:
+- Severe headache (especially occipital, in the back of the head)
+- Vision changes or blurred vision
+- Dizziness or lightheadedness
+- Chest pain
+- Shortness of breath
+- Nosebleeds (less common than believed)
+- Facial flushing
+
+Hypertensive emergency symptoms (systolic > 180, seek emergency care immediately):
+- Severe headache with confusion
+- Chest pain radiating to the arm or jaw
+- Shortness of breath
+- Sudden vision loss
+- Symptoms of stroke (FAST: Face drooping, Arm weakness, Speech difficulty, Time to call 911)
+
+COMPLICATIONS OF UNCONTROLLED HYPERTENSION
+
+Cardiovascular:
+- Left ventricular hypertrophy: thickening of the heart wall from working harder
+- Heart failure: heart unable to pump effectively
+- Coronary artery disease: accelerated atherosclerosis
+- Myocardial infarction (heart attack): 2x higher risk
+- Atrial fibrillation: irregular heart rhythm
+
+Cerebrovascular:
+- Ischemic stroke: blood clot blocking a brain artery (HTN is the #1 risk factor)
+- Hemorrhagic stroke: blood vessel rupture in the brain
+- Vascular dementia: cumulative damage to brain's small blood vessels
+
+Renal:
+- Hypertensive nephropathy: thickening of kidney blood vessels, reduced filtration
+- Chronic kidney disease: second leading cause is hypertension
+- End-stage renal disease requiring dialysis
+
+Ophthalmologic:
+- Hypertensive retinopathy: damage to retinal blood vessels
+- Papilledema: swelling of the optic disc in malignant hypertension
+
+DIAGNOSIS
+Blood pressure should be measured at least twice, in both arms, with the patient seated and rested for 5 minutes. Elevated readings should be confirmed on 2 or more separate visits before diagnosing hypertension.
+
+Home blood pressure monitoring (HBPM) and ambulatory blood pressure monitoring (ABPM) provide more accurate pictures than office readings. White coat hypertension (elevated only in clinical settings) and masked hypertension (normal in clinic, elevated at home) are real phenomena.
+
+TREATMENT
+
+Lifestyle Modifications (recommended for all patients, especially Stage 1):
+- DASH diet: rich in fruits, vegetables, whole grains, lean protein, low-fat dairy; limits red meat, saturated fat, sweets, and sodium. Reduces systolic BP by 8-14 mmHg
+- Sodium restriction: target < 2,300 mg/day (ideally < 1,500 mg/day); reduces systolic BP by 5-6 mmHg
+- Weight reduction: losing 1 kg reduces systolic BP by ~1 mmHg
+- Physical activity: 90-150 min/week of aerobic exercise; reduces systolic BP by 5-8 mmHg
+- Alcohol moderation: ≤ 1 drink/day for women, ≤ 2 for men
+- Smoking cessation: critical for overall cardiovascular risk reduction
+- Stress reduction: mindfulness, yoga, and relaxation techniques have modest BP-lowering effects
+
+Pharmacotherapy (medications):
+First-line antihypertensive drug classes:
+
+1. ACE Inhibitors (e.g., lisinopril, ramipril)
+   - Block angiotensin-converting enzyme; reduce vasoconstriction
+   - First-line for patients with diabetes, CKD, or heart failure
+   - Common side effect: dry cough (10-20% of patients)
+   - Contraindicated in pregnancy
+
+2. ARBs — Angiotensin Receptor Blockers (e.g., losartan, valsartan)
+   - Block angiotensin II receptors; similar benefits to ACE inhibitors
+   - Preferred when ACE inhibitor causes cough
+   - Also contraindicated in pregnancy
+
+3. Calcium Channel Blockers / CCBs (e.g., amlodipine, nifedipine)
+   - Dihydropyridine CCBs: primarily vasodilatory; first-line especially for Black patients
+   - Non-dihydropyridine CCBs (diltiazem, verapamil): also slow heart rate
+   - Common side effects: ankle swelling, headache, flushing
+
+4. Thiazide Diuretics (e.g., hydrochlorothiazide, chlorthalidone)
+   - Increase sodium and water excretion; reduce blood volume
+   - Preferred in older adults and Black patients
+   - Monitor for hypokalemia (low potassium) and gout
+
+5. Beta-Blockers (e.g., metoprolol, atenolol)
+   - Reduce heart rate and cardiac output
+   - Preferred when hypertension accompanies coronary artery disease or heart failure
+   - Not first-line for uncomplicated hypertension
+
+For Stage 2 or resistant hypertension, combination therapy (2 or more drug classes) is typically required.
+
+MONITORING AND TARGETS
+- Blood pressure target for most adults: < 130/80 mmHg (ACC/AHA guidelines)
+- For adults ≥ 65 years: < 130/80 mmHg (benefit shown in SPRINT trial)
+- Regular monitoring: every 1-3 months until target achieved, then every 3-6 months
+- Annual labs: basic metabolic panel (kidney function, potassium), lipid panel, ECG
+
+HYPERTENSIVE CRISIS
+Hypertensive urgency: systolic > 180 OR diastolic > 120, no acute organ damage. Managed with oral medications, gradual BP reduction over 24-48 hours.
+
+Hypertensive emergency: same BP threshold WITH evidence of acute organ damage (stroke, heart attack, aortic dissection, acute kidney injury, encephalopathy). Requires ICU admission and IV antihypertensive therapy with careful, controlled BP reduction.

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/kowsh/.claude/**)",
+      "Read(//c/Users/kowsh/.claude/projects/**)"
+    ]
+  }
+}

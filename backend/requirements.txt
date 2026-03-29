@@ -29,9 +29,13 @@ Pillow>=10.4.0
 pytesseract>=0.3.13
 openai-whisper>=20231117
 
-# ── Phase 3 (uncomment when needed) ────────────
-# chromadb>=0.5.5
-# sentence-transformers>=3.0.1
+# ── Phase 3 (RAG Pipeline) ─────────────────────
+chromadb>=0.5.5
+sentence-transformers>=3.0.1
 
-# ── Phase 4 (uncomment when needed) ────────────
-# groq>=0.11.0
+# ── Phase 4 (Reasoning / Agent Mode) ───────────
+groq>=0.11.0
+
+# ── Phase 5 (Benchmarking) ──────────────────────
+datasets>=2.20.0
+tqdm>=4.66.0
