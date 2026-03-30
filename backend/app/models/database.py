@@ -140,7 +140,24 @@ class Message(Base):
 class Attachment(Base):
     """
     Files attached to a message (images, PDFs, documents).
-    'extracted_text' stores what we pulled out of the file for the LLM.
+    
+    CHANGE: Removed extracted_text storage.
+    Text is now:
+    1. Extracted during upload
+    2. Chunked using file-type aware sizing
+    3. Embedded and stored in ChromaDB for RAG
+    4. Retrieved via RAG search when needed (not injected wholesale)
+    
+    This design:
+    - Reduces SQLite size (no full text storage)
+    - Enables better semantic search (via RAG)
+    - Prevents token bloat in LLM prompts (only relevant chunks used)
+    
+    Metadata maintained for reference:
+    - filename: original uploaded filename
+    - file_type: "pdf", "docx", "image", "text"
+    - file_path: location on disk
+    - message_id: which message this was attached to
     """
 
     __tablename__ = "attachments"
@@ -150,7 +167,7 @@ class Attachment(Base):
     filename = Column(String, nullable=False)
     file_type = Column(String, nullable=False)  # "pdf", "image", "docx", etc.
     file_path = Column(String, nullable=False)  # Where it's stored on disk
-    extracted_text = Column(Text, nullable=True)  # Text extracted from the file
+    # CHANGE: Removed extracted_text field — text now stored only in ChromaDB
     created_at = Column(DateTime, default=utc_now)
 
     message = relationship("Message", back_populates="attachments")

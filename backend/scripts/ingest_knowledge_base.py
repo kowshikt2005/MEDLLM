@@ -6,7 +6,10 @@ WHAT THIS SCRIPT DOES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. Reads all documents in backend/data/knowledge_base/
 2. Extracts text from each file (PDF, DOCX, TXT — same as Phase 2)
-3. Splits the text into overlapping chunks (~500 chars each)
+3. CHANGE: Splits text into chunks using file-type aware sizing:
+   - PDF: 1200 chars, 200 overlap (structured content)
+   - DOCX: 1000 chars, 150 overlap (narrative)
+   - Text/CSV/MD: 800 chars, 120 overlap (dense)
 4. Embeds each chunk using sentence-transformers (all-MiniLM-L6-v2)
 5. Stores the chunks + embeddings in ChromaDB (persistent on disk)
 
@@ -22,9 +25,15 @@ A medical textbook might be 500,000 characters. We can't embed that as
 a single piece — it would take too much memory and the resulting vector
 would be a blurry average of everything.
 
-Instead, we split it into chunks of ~500 characters, with 100 characters
-of OVERLAP between consecutive chunks. The overlap prevents important
-information from being cut in half at a chunk boundary.
+Instead, we split it into chunks with OVERLAP between consecutive chunks.
+The overlap prevents important information from being cut in half at a
+chunk boundary.
+
+CHANGE: Chunk sizes now depend on file type:
+- PDFs (1200 chars): Benefit from larger chunks due to structured content
+- DOCX (1000 chars): Narrative documents with medium density
+- Text files (800 chars): Often dense, use smaller chunks for precision
+- Image OCR (700 chars): Less reliable, smaller chunks for safety
 
 Example with CHUNK_SIZE=20, CHUNK_OVERLAP=5:
   "Diabetes is a chronic disease that affects blood sugar levels"
@@ -32,9 +41,6 @@ Example with CHUNK_SIZE=20, CHUNK_OVERLAP=5:
   chunk 1: "chroni c disease that"    ← "chroni" repeated as overlap
   chunk 2: "t affects blood sugar"    ← "t" from "that" repeated
   chunk 3: "sugar levels"
-
-In practice with 500-char chunks, each chunk is about 2-3 paragraphs —
-enough context for meaningful retrieval without being too large.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STABLE IDs
@@ -47,7 +53,6 @@ This means:
 """
 
 import asyncio
-import hashlib
 import os
 import sys
 
@@ -58,7 +63,7 @@ import sys
 # os.path.dirname(os.path.dirname(__file__))     → backend/
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.document_processor import detect_file_type, extract_text
+from app.services.document_processor import detect_file_type, extract_text, chunk_text
 from app.services.rag_service import add_documents, collection_size, delete_collection
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -68,58 +73,14 @@ KNOWLEDGE_BASE_DIR = os.path.join(
     "knowledge_base",
 )
 
-CHUNK_SIZE = 500     # Characters per chunk
-CHUNK_OVERLAP = 100  # Characters of overlap between consecutive chunks
+# CHANGE: File-type aware chunking is now handled by document_processor.chunk_text()
+# See CHUNK_CONFIG in document_processor.py for per-file-type settings:
+#   - PDF: 1200 chars, 200 overlap
+#   - DOCX: 1000 chars, 150 overlap
+#   - Text/CSV/MD: 800 chars, 120 overlap
+#   - Image: 700 chars, 100 overlap
+
 BATCH_SIZE = 50      # How many chunks to add to ChromaDB at once
-
-
-# ── Chunking ──────────────────────────────────────────────────────────────────
-
-def chunk_text(
-    text: str,
-    source_name: str,
-) -> tuple[list[str], list[dict], list[str]]:
-    """
-    Split a long text into overlapping chunks.
-
-    Returns three parallel lists (same length, same indices):
-      texts:     the actual chunk content
-      metadatas: {"source": filename, "chunk_index": i} for each chunk
-      ids:       unique stable ID for each chunk
-
-    Args:
-        text:        the full extracted text from a document
-        source_name: the filename, used in metadata and IDs
-    """
-    texts = []
-    metadatas = []
-    ids = []
-
-    chunk_index = 0
-    start = 0
-
-    while start < len(text):
-        end = start + CHUNK_SIZE
-        chunk = text[start:end].strip()
-
-        if chunk:  # Skip empty chunks (can happen at end of text)
-            # Stable ID: filename + chunk index + first 8 chars of content hash
-            # This means the same content always gets the same ID
-            content_hash = hashlib.md5(chunk.encode()).hexdigest()[:8]
-            chunk_id = f"{source_name}_chunk_{chunk_index}_{content_hash}"
-
-            texts.append(chunk)
-            metadatas.append({
-                "source": source_name,
-                "chunk_index": chunk_index,
-            })
-            ids.append(chunk_id)
-            chunk_index += 1
-
-        # Advance by (CHUNK_SIZE - CHUNK_OVERLAP) so consecutive chunks overlap
-        start += CHUNK_SIZE - CHUNK_OVERLAP
-
-    return texts, metadatas, ids
 
 
 # ── Single-file processing ────────────────────────────────────────────────────
@@ -127,6 +88,8 @@ def chunk_text(
 async def ingest_file(file_path: str, filename: str) -> int:
     """
     Process one file: extract → chunk → embed → store in ChromaDB.
+
+    CHANGE: Uses file-type aware chunking with optimized sizes per file type
 
     Returns the number of chunks added (0 if skipped).
     """
@@ -143,9 +106,10 @@ async def ingest_file(file_path: str, filename: str) -> int:
         print(f"    Skipping {filename}: no usable text extracted")
         return 0
 
-    print(f"    {len(text)} characters extracted. Chunking...")
-    texts, metadatas, ids = chunk_text(text, filename)
-    print(f"    {len(texts)} chunks created. Embedding + storing...")
+    print(f"    {len(text)} characters extracted. Chunking with {file_type} parameters...")
+    # CHANGE: Pass file_type to chunk_text for type-aware chunking
+    texts, metadatas, ids = chunk_text(text, filename, file_type=file_type)
+    print(f"    {len(texts)} chunks created ({metadatas[0]['file_type']} config). Embedding + storing...")
 
     # Add in batches to avoid loading all embeddings into memory at once
     for i in range(0, len(texts), BATCH_SIZE):
@@ -165,7 +129,8 @@ async def main():
     print("MedLLM — Knowledge Base Ingestion")
     print("=" * 50)
     print(f"Directory: {KNOWLEDGE_BASE_DIR}")
-    print(f"Chunk size: {CHUNK_SIZE} chars  |  Overlap: {CHUNK_OVERLAP} chars")
+    # CHANGE: Show that chunking is now file-type aware
+    print(f"Chunking: File-type aware (PDF: 1200/200, DOCX: 1000/150, Text: 800/120, Image: 700/100)")
     print()
 
     # Verify the knowledge base directory exists

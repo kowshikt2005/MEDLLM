@@ -113,11 +113,27 @@ class HealthProfileResponse(HealthProfileRequest):
 # ═══════════════════════════════════════════════════════════
 
 class UploadResponse(BaseModel):
-    """What the backend returns after processing an uploaded file."""
+    """
+    What the backend returns after processing an uploaded file.
+    
+    CHANGE: Removed extracted_text from response.
+    The upload now:
+    1. Extracts text
+    2. Chunks using file-type aware sizing
+    3. Embeds and stores in ChromaDB
+    4. Stores only metadata in SQLite
+    
+    This allows RAG search to retrieve relevant chunks when needed,
+    rather than injecting the entire file content into every LLM prompt.
+    
+    Response includes:
+    - upload_id: Reference to use when sending chat messages
+    - filename: Original uploaded filename
+    - file_type: Detected file type (pdf, docx, image, text)
+    """
     upload_id: str
     filename: str
     file_type: str
-    extracted_text: str
     preview_url: str | None = None
 
 

@@ -11,16 +11,33 @@ How it fits in the pipeline:
   1. User uploads a file via POST /api/upload
   2. The upload router saves the file to disk
   3. This service extracts text from the saved file
-  4. The extracted text is stored in the Attachment row
-  5. When the user sends a chat message, chat.py injects this text into the LLM prompt
+  4. The extracted text is chunked into smaller pieces (CHANGE: file-type aware)
+  5. Chunks are embedded and stored in ChromaDB for RAG
+  6. Only metadata is stored in SQLite (CHANGE: no full text stored)
+  7. When the user sends a chat message, RAG retrieves relevant chunks for context
 """
 
+import hashlib
 import os
 
 import pdfplumber
 import pytesseract
 from docx import Document
 from PIL import Image
+
+
+# CHANGE: File-type aware chunk configuration
+# Different document types have different optimal chunk sizes:
+# - PDFs benefit from larger chunks due to structured content
+# - DOCX documents are narrative and can use medium chunks
+# - Text/CSV/Markdown are often dense and use smaller chunks
+# - OCR text is less reliable so smaller chunks work better
+CHUNK_CONFIG = {
+    "pdf": {"chunk_size": 1200, "overlap": 200},
+    "docx": {"chunk_size": 1000, "overlap": 150},
+    "text": {"chunk_size": 800, "overlap": 120},
+    "image": {"chunk_size": 700, "overlap": 100},
+}
 
 
 async def extract_text(file_path: str, file_type: str) -> str:
@@ -119,3 +136,68 @@ def detect_file_type(filename: str) -> str:
         return "text"
     else:
         return "unknown"
+
+
+# CHANGE: New function to chunk text with file-type aware sizing
+def chunk_text(
+    text: str,
+    source_name: str,
+    file_type: str = "text",
+) -> tuple[list[str], list[dict], list[str]]:
+    """
+    Split a long text into overlapping chunks with file-type aware sizing.
+
+    CHANGE: Uses different chunk sizes and overlaps based on file_type:
+      - PDF: 1200 chars, 200 overlap (structured, can be verbose)
+      - DOCX: 1000 chars, 150 overlap (narrative, medium density)
+      - Text/CSV/MD: 800 chars, 120 overlap (often dense)
+      - Image (OCR): 700 chars, 100 overlap (less reliable, use smaller chunks)
+
+    Returns three parallel lists (same length, same indices):
+      texts:     the actual chunk content
+      metadatas: {"source": filename, "chunk_index": i, "file_type": type} for each chunk
+      ids:       unique stable ID for each chunk
+
+    Args:
+        text:        the full extracted text from a document
+        source_name: the filename, used in metadata and IDs
+        file_type:   one of "pdf", "docx", "text", "image" (default "text")
+
+    Returns:
+        (texts, metadatas, ids) - three parallel lists
+    """
+    # Get chunk config for this file type (default to "text" if not found)
+    config = CHUNK_CONFIG.get(file_type, CHUNK_CONFIG["text"])
+    chunk_size = config["chunk_size"]
+    chunk_overlap = config["overlap"]
+
+    texts = []
+    metadatas = []
+    ids = []
+
+    chunk_index = 0
+    start = 0
+
+    while start < len(text):
+        end = start + chunk_size
+        chunk = text[start:end].strip()
+
+        if chunk:  # Skip empty chunks (can happen at end of text)
+            # Stable ID: filename + chunk index + first 8 chars of content hash
+            # This means the same content always gets the same ID
+            content_hash = hashlib.md5(chunk.encode()).hexdigest()[:8]
+            chunk_id = f"{source_name}_chunk_{chunk_index}_{content_hash}"
+
+            texts.append(chunk)
+            metadatas.append({
+                "source": source_name,
+                "chunk_index": chunk_index,
+                "file_type": file_type,  # CHANGE: Track original file type
+            })
+            ids.append(chunk_id)
+            chunk_index += 1
+
+        # Advance by (chunk_size - overlap) so consecutive chunks overlap
+        start += chunk_size - chunk_overlap
+
+    return texts, metadatas, ids
