@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Read(//c/Users/kowsh/.claude/**)",
-      "Read(//c/Users/kowsh/.claude/projects/**)"
+      "Read(//c/Users/kowsh/.claude/projects/**)",
+      "Bash(python -c ':*)"
     ]
   }
 }
