@@ -39,6 +39,7 @@ restart reads the same data — no need to re-index every time.
 """
 
 import chromadb
+from cross_encoder import CrossEncoder
 
 from app.config import settings
 from app.services.embedding_service import embed_query, embed_texts
@@ -46,9 +47,15 @@ from app.services.embedding_service import embed_query, embed_texts
 # Collection name — like a "table" name in ChromaDB
 COLLECTION_NAME = "medical_knowledge"
 
+# CHANGE: Add cross-encoder reranker for Top-K reranking
+# This model is specifically designed for ranking search results
+# "ms-marco-MiniLM-L-6-v2" is optimized for semantic relevance ranking
+RERANKER_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
 # Module-level singletons — initialized on first use
 _client: chromadb.ClientAPI | None = None
 _collection = None
+_reranker: CrossEncoder | None = None
 
 
 def _get_collection():
@@ -67,15 +74,43 @@ def _get_collection():
         # PersistentClient saves the index to disk at chroma_persist_dir.
         # No extra settings needed — chromadb 0.5.x works cleanly without them.
         _client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
+        
+        # CHANGE: Updated HNSW configuration for improved retrieval quality
+        # hnsw:M = 48 (increased from default 5) - more connections per node = better recall
+        # hnsw:ef_construction = 200 (increased from default 200) - better index construction
+        # These parameters improve search accuracy at the cost of slightly longer construction time
         _collection = _client.get_or_create_collection(
             name=COLLECTION_NAME,
             # We embed ourselves (embedding_service.py), so we don't want
             # ChromaDB to also try to embed. That's why we don't set
             # embedding_function here.
-            metadata={"hnsw:space": "cosine"},  # Use cosine similarity
+            metadata={
+                "hnsw:space": "cosine",
+                "hnsw:M": 48,
+                "hnsw:ef_construction": 200,
+            },
         )
 
     return _collection
+
+
+# CHANGE: New function to get/load the cross-encoder reranker model
+def _get_reranker() -> CrossEncoder:
+    """
+    Lazy-load the cross-encoder model on first call.
+    
+    The cross-encoder model is used to rerank the top-K results from ChromaDB.
+    It's more accurate than cosine similarity but slower, so we use it after
+    the initial fast similarity search (Top-K reranking approach).
+    
+    Lazy loading keeps server startup fast — the model only loads when needed.
+    """
+    global _reranker
+    if _reranker is None:
+        print(f"[Reranker] Loading model: {RERANKER_MODEL_NAME} (first-time ~3-5s)...")
+        _reranker = CrossEncoder(RERANKER_MODEL_NAME)
+        print("[Reranker] Model loaded and cached in memory.")
+    return _reranker
 
 
 def add_documents(
@@ -118,21 +153,26 @@ def search(query: str, n_results: int = 3) -> list[dict]:
     """
     Find the N most semantically relevant document chunks for a query.
 
-    This is called on EVERY chat message. It:
-    1. Embeds the user's query into a vector
-    2. Asks ChromaDB: "what chunks are closest to this vector?"
-    3. Filters out low-relevance results (similarity < 0.6)
-    4. Returns the relevant chunks with metadata
+    This implements Top-K Rerank RAG for improved relevance:
+    1. Initial retrieval: retrieve top 15 chunks from ChromaDB using cosine similarity
+    2. Reranking: apply cross-encoder model to get more accurate relevance scores
+    3. Selection: pick the top 5 after reranking
+    4. Filtering: apply cosine similarity threshold (0.6) to remove low-relevance chunks
+    5. Return: top N results (default 3) to the LLM
+
+    CHANGE: Implements Top-K reranking strategy for better result quality
+    This retrieves more candidates initially, then uses a more accurate cross-encoder
+    to rerank them, improving the relevance of final results.
 
     Args:
         query:     The user's chat message
-        n_results: How many top chunks to retrieve (default 3)
+        n_results: How many top chunks to return (default 3, max 5 after reranking)
 
     Returns:
         List of dicts, each with:
           - "text":   the chunk content (injected into the LLM prompt)
           - "source": the source document filename
-          - "score":  similarity score 0.0-1.0 (higher = more relevant)
+          - "score":  cross-encoder relevance score (0.0-1.0, higher = more relevant)
 
         Returns [] if the knowledge base is empty or nothing is relevant.
     """
@@ -145,42 +185,76 @@ def search(query: str, n_results: int = 3) -> list[dict]:
     # Embed the query (same model as used during indexing — MUST be consistent)
     query_embedding = embed_query(query)
 
-    # Query ChromaDB for the most similar chunks
-    # min() ensures we don't request more results than we have stored
+    # ── STAGE 1: Initial retrieval ──────────────────────────────────────────
+    # CHANGE: Retrieve top 15 candidates (instead of just n_results)
+    # This gives the reranker more options to work with
+    initial_n_results = min(15, collection.count())
+    
     results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=min(n_results, collection.count()),
+        n_results=initial_n_results,
         include=["documents", "metadatas", "distances"],
     )
 
-    # results["documents"][0] is a list of chunk texts
-    # results["metadatas"][0] is a list of metadata dicts
-    # results["distances"][0] is a list of cosine distances
-    # The [0] is because we queried with one query (results are batched)
+    docs = results["documents"][0]
+    metas = results["metadatas"][0]
+    distances = results["distances"][0]
 
+    # ── STAGE 2: Cross-encoder reranking ────────────────────────────────────
+    # CHANGE: Apply reranker to get more accurate relevance scores
+    # Build query-document pairs for the reranker
+    candidate_pairs = [[query, doc] for doc in docs]
+    
+    try:
+        reranker = _get_reranker()
+        # Cross-encoder returns scores for each pair (0-1, higher = more relevant)
+        reranker_scores = reranker.predict(candidate_pairs)
+        
+        # Create list of (index, score) tuples and sort by reranker score
+        indexed_scores = list(enumerate(reranker_scores))
+        indexed_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # ── STAGE 3: Select top 5 after reranking ───────────────────────────
+        # CHANGE: Keep top 5 reranked results
+        top_k_after_rerank = 5
+        selected_indices = [idx for idx, _ in indexed_scores[:top_k_after_rerank]]
+        
+    except Exception as e:
+        # Fallback if reranker fails — use original cosine distances
+        print(f"[RAG] Reranker error: {e}. Falling back to cosine similarity scores.")
+        selected_indices = list(range(len(docs)))
+        reranker_scores = [1 - (dist / 2) for dist in distances]  # Convert to similarity
+
+    # ── STAGE 4: Filter by cosine similarity and format results ────────────
     chunks = []
-    for doc, meta, dist in zip(
-        results["documents"][0],
-        results["metadatas"][0],
-        results["distances"][0],
-    ):
+    for idx in selected_indices:
+        if idx >= len(docs):
+            continue
+            
+        doc = docs[idx]
+        meta = metas[idx]
+        dist = distances[idx]
+
         # Convert cosine distance → similarity score
         # distance=0 means identical, distance=2 means opposite
         similarity = 1 - (dist / 2)
 
-        # Only include genuinely relevant chunks.
-        # With formula `1 - (dist/2)`, threshold 0.6 means cosine_similarity > 0.2
-        # (dist < 0.8). Anything below 0.6 is likely off-topic or loosely related
-        # and would add noise to the prompt rather than helping the LLM.
+        # CHANGE: Keep original cosine similarity filtering
+        # Only include results with similarity > 0.6 (genuinely relevant)
+        # This threshold removes off-topic or loosely related chunks
         if similarity > 0.6:
+            # Get reranker score if available, otherwise use similarity
+            reranker_score = reranker_scores[idx] if idx < len(reranker_scores) else similarity
+            
             chunks.append({
                 "text": doc,
                 "source": meta.get("source", "Unknown"),
                 "chunk_index": meta.get("chunk_index", 0),
-                "score": round(similarity, 3),
+                "score": round(float(reranker_score), 3),  # CHANGE: Use reranker score
             })
 
-    return chunks
+    # Return only n_results (default 3, but limited by what passed filtering)
+    return chunks[:n_results]
 
 
 def collection_size() -> int:

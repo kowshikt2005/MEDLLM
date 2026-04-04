@@ -76,6 +76,8 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         await db.commit()
 
         # ── Step 3: Process file attachments (Phase 2) ───────────────────
+        # CHANGE: New attachment processing for RAG-first architecture
+        # Attachments are now processed via RAG search, not full text injection
         attachment_context = ""
         image_descriptions = []
 
@@ -88,13 +90,9 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
             for attachment in attachments:
                 attachment.message_id = user_message.id
 
-                if attachment.extracted_text:
-                    attachment_context += (
-                        f"\n\n--- Attached file: {attachment.filename} ---\n"
-                        f"{attachment.extracted_text}\n"
-                        f"--- End of {attachment.filename} ---\n"
-                    )
-
+                # CHANGE: No longer using attachment.extracted_text
+                # Text is in ChromaDB, accessible via RAG search
+                # Only process visual descriptions for images
                 if attachment.file_type == "image":
                     try:
                         import ollama as ollama_client
@@ -176,15 +174,22 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
                     "content": "Groq API key not configured — using standard mode. Add GROQ_API_KEY to backend/.env to enable reasoning mode.",
                 })
 
-            # RAG retrieval
+            # ── RAG retrieval ──────────────────────────────────────────────
+            # CHANGE: RAG now handles both knowledge base AND uploaded attachments
+            # Chunks from both sources are in the same ChromaDB collection
+            # RAG search:
+            # 1. Retrieves top 15 candidates using cosine similarity
+            # 2. Applies cross-encoder reranking for accuracy
+            # 3. Selects best 5 and filters by similarity threshold
+            # 4. Returns top 3 results to the LLM
             rag_sources = rag_service.search(request.message, n_results=3)
 
             if rag_sources:
-                print(f"[RAG] {len(rag_sources)} chunk(s) found for: {request.message[:60]}...")
+                print(f"[RAG] {len(rag_sources)} chunk(s) found (Top-K reranked) for: {request.message[:60]}...")
             else:
-                print("[RAG] No relevant chunks found (knowledge base may be empty).")
+                print("[RAG] No relevant chunks found (knowledge base and attachments may be empty).")
 
-            # Build system prompt with RAG context + attachments
+            # Build system prompt with RAG context + image descriptions
             system_prompt = build_system_prompt(
                 rag_sources=rag_sources,
                 attachment_context=attachment_context,
