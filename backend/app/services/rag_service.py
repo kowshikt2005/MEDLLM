@@ -39,7 +39,7 @@ restart reads the same data — no need to re-index every time.
 """
 
 import chromadb
-from cross_encoder import CrossEncoder
+from sentence_transformers import CrossEncoder
 
 from app.config import settings
 from app.services.embedding_service import embed_query, embed_texts
@@ -56,6 +56,15 @@ RERANKER_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 _client: chromadb.ClientAPI | None = None
 _collection = None
 _reranker: CrossEncoder | None = None
+
+
+def _resolve_source_name(meta: dict) -> str:
+    """Pick the most useful citation label from metadata."""
+    reference = str(meta.get("reference") or "").strip()
+    if reference and reference.lower() != "unknown":
+        return reference
+    source = str(meta.get("source") or "").strip()
+    return source or "Unknown"
 
 
 def _get_collection():
@@ -75,10 +84,8 @@ def _get_collection():
         # No extra settings needed — chromadb 0.5.x works cleanly without them.
         _client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
         
-        # CHANGE: Updated HNSW configuration for improved retrieval quality
-        # hnsw:M = 48 (increased from default 5) - more connections per node = better recall
-        # hnsw:ef_construction = 200 (increased from default 200) - better index construction
-        # These parameters improve search accuracy at the cost of slightly longer construction time
+        # Keep metadata minimal for broad chromadb compatibility.
+        # Some builds reject advanced HNSW metadata fields during collection creation.
         _collection = _client.get_or_create_collection(
             name=COLLECTION_NAME,
             # We embed ourselves (embedding_service.py), so we don't want
@@ -86,8 +93,6 @@ def _get_collection():
             # embedding_function here.
             metadata={
                 "hnsw:space": "cosine",
-                "hnsw:M": 48,
-                "hnsw:ef_construction": 200,
             },
         )
 
@@ -207,7 +212,7 @@ def search(query: str, n_results: int = 3) -> list[dict]:
     
     try:
         reranker = _get_reranker()
-        # Cross-encoder returns scores for each pair (0-1, higher = more relevant)
+        # Cross-encoder returns ranking scores used for sorting candidates.
         reranker_scores = reranker.predict(candidate_pairs)
         
         # Create list of (index, score) tuples and sort by reranker score
@@ -243,14 +248,14 @@ def search(query: str, n_results: int = 3) -> list[dict]:
         # Only include results with similarity > 0.6 (genuinely relevant)
         # This threshold removes off-topic or loosely related chunks
         if similarity > 0.6:
-            # Get reranker score if available, otherwise use similarity
-            reranker_score = reranker_scores[idx] if idx < len(reranker_scores) else similarity
-            
             chunks.append({
                 "text": doc,
-                "source": meta.get("source", "Unknown"),
+                # Prefer per-record reference over file name for clearer citations.
+                "source": _resolve_source_name(meta),
+                "source_file": meta.get("source", "Unknown"),
                 "chunk_index": meta.get("chunk_index", 0),
-                "score": round(float(reranker_score), 3),  # CHANGE: Use reranker score
+                # Use cosine similarity for user-facing confidence display.
+                "score": round(float(similarity), 3),
             })
 
     # Return only n_results (default 3, but limited by what passed filtering)

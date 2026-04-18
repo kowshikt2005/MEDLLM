@@ -41,7 +41,8 @@ function SourceCitations({ sources }) {
       <div className="flex flex-wrap gap-1.5">
         {sources.map((s, index) => {
           // Convert score (0-1) to a percentage for display
-          const pct = Math.round(s.score * 100)
+          const raw = Number(s.score ?? 0)
+          const pct = Math.round(Math.max(0, Math.min(1, raw)) * 100)
 
           // Color the chip based on relevance score:
           //   ≥ 70% → teal (high confidence)
@@ -56,13 +57,14 @@ function SourceCitations({ sources }) {
 
           // Strip the file extension for a cleaner display name
           // e.g. "diabetes_guide.txt" → "diabetes_guide"
-          const displayName = s.source.replace(/\.[^/.]+$/, "")
+          const sourceLabel = String(s.source || "Unknown")
+          const displayName = sourceLabel.replace(/\.[^/.]+$/, "")
 
           return (
             <span
               key={index}
               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-medium ${chipColor}`}
-              title={`${s.source} — ${pct}% relevance`}
+              title={`${sourceLabel} — ${pct}% relevance`}
             >
               <BookOpen size={10} />
               {displayName}

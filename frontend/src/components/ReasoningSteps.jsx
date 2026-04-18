@@ -30,6 +30,10 @@ import { Brain, ChevronDown, ChevronUp, CheckCircle, Loader } from "lucide-react
 function ReasoningSteps({ steps, isComplete }) {
   // Start expanded while streaming, collapse automatically when done
   const [expanded, setExpanded] = useState(true)
+  const hasReasoningKeywords = steps.some((step) =>
+    /(sub-question|researching|synthesizing|analyzing)/i.test(step)
+  )
+  const panelTitle = hasReasoningKeywords ? "Reasoning process" : "Response progress"
 
   useEffect(() => {
     if (isComplete) {
@@ -52,7 +56,7 @@ function ReasoningSteps({ steps, isComplete }) {
         <div className="flex items-center gap-2">
           <Brain size={14} className="text-purple-600" />
           <span className="text-xs font-semibold text-purple-700">
-            Reasoning process
+            {panelTitle}
           </span>
           <span className="text-xs text-purple-500">
             ({steps.length} step{steps.length !== 1 ? "s" : ""})

@@ -337,9 +337,11 @@ def main():
 
     results = run_benchmark(args.provider, args.model, args.n)
 
-    # Save to JSON (timestamped — keeps both before and after runs)
+    # Save to JSON (timestamped — keeps both before and after runs).
+    # Windows forbids characters like ':' in filenames, so sanitize model labels.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path  = RESULTS_DIR / f"{results['provider']}_{results['model']}_{timestamp}.json"
+    safe_model = re.sub(r"[^A-Za-z0-9._-]+", "_", results["model"]).strip("_") or "model"
+    out_path  = RESULTS_DIR / f"{results['provider']}_{safe_model}_{timestamp}.json"
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
 

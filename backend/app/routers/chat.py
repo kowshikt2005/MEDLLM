@@ -25,6 +25,8 @@ Phase 4 additions:
 
 import base64
 import json
+import time
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -41,6 +43,30 @@ from app.services.llm_service import llm_service
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
+def _build_clinician_style_query(user_query: str) -> str:
+    """Anchor output style toward clinician-to-clinician communication."""
+    return (
+        f"Clinical query: {user_query}\n\n"
+        "Respond for a licensed clinician. "
+        "Use sections: Assessment, Initial Approach, Escalation / Red Flags. "
+        "Keep it concise and clinically focused. "
+        "Avoid layperson counseling tone unless explicitly requested."
+    )
+
+
+def _dedupe_sources(sources: list[dict]) -> list[dict]:
+    """Merge duplicate source labels and keep the highest confidence score."""
+    merged: dict[str, float] = {}
+    for s in sources:
+        label = str(s.get("source") or "Unknown")
+        score = float(s.get("score") or 0.0)
+        merged[label] = max(merged.get(label, 0.0), score)
+    return [
+        {"source": label, "score": round(score, 3)}
+        for label, score in merged.items()
+    ]
+
+
 @router.post("/chat")
 async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     """
@@ -52,6 +78,14 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     """
 
     async def event_generator():
+        req_id = uuid4().hex[:8]
+        started_at = time.perf_counter()
+        token_chunks = 0
+
+        print(
+            f"[Chat:{req_id}] Incoming request | mode={request.mode} | "
+            f"has_conversation={bool(request.conversation_id)} | attachments={len(request.attachments)}"
+        , flush=True)
 
         # ── Step 1: Create or load conversation ──────────────────────────
         conversation_id = request.conversation_id
@@ -65,6 +99,8 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
             await db.commit()
             await db.refresh(conversation)
             conversation_id = conversation.id
+
+        print(f"[Chat:{req_id}] Conversation: {conversation_id}", flush=True)
 
         # ── Step 2: Save user message ─────────────────────────────────────
         user_message = Message(
@@ -119,6 +155,8 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
 
             await db.commit()
 
+        print(f"[Chat:{req_id}] Image descriptions: {len(image_descriptions)}", flush=True)
+
         # ── Step 4: Route to normal or reasoning mode ─────────────────────
         #
         # NORMAL MODE:
@@ -143,7 +181,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
 
         if use_reasoning:
             # ── REASONING MODE ─────────────────────────────────────────────
-            print(f"[Chat] Reasoning mode for: {request.message[:60]}...")
+            print(f"[Chat:{req_id}] Reasoning mode for: {request.message[:60]}...", flush=True)
 
             async for event_json in reasoning_service.reason_stream(
                 request.message,
@@ -159,6 +197,9 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
                 elif data["type"] == "token":
                     # Accumulate full response for saving to DB
                     full_response += data["content"]
+                    token_chunks += 1
+                    if token_chunks % 40 == 0:
+                        print(f"[Chat:{req_id}] Streaming | token_chunks={token_chunks}", flush=True)
                     yield event_json
 
                 else:
@@ -167,6 +208,11 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
 
         else:
             # ── NORMAL MODE ────────────────────────────────────────────────
+            yield json.dumps({
+                "type": "step",
+                "content": "Checking relevant medical references...",
+            })
+
             if request.mode == "reasoning" and not settings.groq_api_key:
                 # Inform user why we're falling back
                 yield json.dumps({
@@ -185,9 +231,18 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
             rag_sources = rag_service.search(request.message, n_results=3)
 
             if rag_sources:
-                print(f"[RAG] {len(rag_sources)} chunk(s) found (Top-K reranked) for: {request.message[:60]}...")
+                sources_brief = ", ".join([s["source"] for s in rag_sources])
+                print(
+                    f"[Chat:{req_id}] RAG hits={len(rag_sources)} for: {request.message[:60]}... "
+                    f"| sources=[{sources_brief}]"
+                , flush=True)
             else:
-                print("[RAG] No relevant chunks found (knowledge base and attachments may be empty).")
+                print(f"[Chat:{req_id}] RAG hits=0 (knowledge base and attachments may be empty).", flush=True)
+
+            yield json.dumps({
+                "type": "step",
+                "content": "Drafting your answer...",
+            })
 
             # Build system prompt with RAG context + image descriptions
             system_prompt = build_system_prompt(
@@ -196,16 +251,21 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
                 image_descriptions=image_descriptions,
             )
 
-            messages = [{"role": "user", "content": request.message}]
+            styled_query = _build_clinician_style_query(request.message)
+            messages = [{"role": "user", "content": styled_query}]
 
             async for token in llm_service.chat_stream(messages, system_prompt):
                 full_response += token
+                token_chunks += 1
+                if token_chunks % 40 == 0:
+                    print(f"[Chat:{req_id}] Streaming | token_chunks={token_chunks}", flush=True)
                 yield json.dumps({"type": "token", "content": token})
 
             sources = [
                 {"source": s["source"], "score": s["score"]}
                 for s in rag_sources
             ]
+            sources = _dedupe_sources(sources)
 
         # ── Step 5: Save assistant response to DB ─────────────────────────
         assistant_message = Message(
@@ -216,12 +276,18 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         db.add(assistant_message)
         await db.commit()
 
+        elapsed = time.perf_counter() - started_at
+        print(
+            f"[Chat:{req_id}] Completed | seconds={elapsed:.2f} | token_chunks={token_chunks} | "
+            f"response_chars={len(full_response)} | sources={len(sources)}"
+        , flush=True)
+
         # ── Step 6: Send done event with sources ──────────────────────────
         yield json.dumps({
             "type": "done",
             "content": "",
             "conversation_id": conversation_id,
-            "sources": sources,
+            "sources": _dedupe_sources(sources),
         })
 
     return EventSourceResponse(event_generator())

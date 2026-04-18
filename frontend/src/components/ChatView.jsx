@@ -710,7 +710,7 @@ function ChatView() {
                       />
                     )}
 
-                    <p>{message.text}</p>
+                    <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p>
 
                     {/* Phase 3: source citations from RAG retrieval */}
                     {message.sender !== "User" && (

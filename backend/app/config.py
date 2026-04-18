@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # ── Ollama (local LLM) ───────────────────────────────
     ollama_host: str = "http://localhost:11434"
-    ollama_model: str = "mistral"  # Will become "medllm" after fine-tuning
+    ollama_model: str = "medllama:latest"
 
     # ── Groq (reasoning mode — optional) ─────────────────
     groq_api_key: str = ""
