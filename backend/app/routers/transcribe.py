@@ -18,16 +18,21 @@ Why not stream the transcription?
 import os
 import tempfile
 
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File
 
+from app.models.database import User
 from app.models.schemas import TranscriptionResponse
+from app.routers.auth import get_current_user
 from app.services.transcription import transcribe
 
 router = APIRouter(prefix="/api", tags=["transcribe"])
 
 
 @router.post("/transcribe", response_model=TranscriptionResponse)
-async def transcribe_audio(file: UploadFile = File(...)):
+async def transcribe_audio(
+  file: UploadFile = File(...),
+  current_user: User = Depends(get_current_user),
+):
     """
     Transcribe an audio file to text.
 
@@ -40,6 +45,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
 
     try:
+        _ = current_user.id  # Explicitly require authenticated context.
         content = await file.read()
         tmp.write(content)
         tmp.close()

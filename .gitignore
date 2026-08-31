@@ -48,3 +48,17 @@ backend/uploads/
 
 # OS
 Thumbs.db
+
+# Local planning notes (temporary)
+.md/
+# Local MedLLM generated data and one-off diagnostics (do not publish)
+backend/data/uploads/
+backend/data/benchmark_results/
+backend/data/chroma_db_backup_*/
+backend/test_rag_debug.py
+backend/test_rag_deep_debug.py
+backend/test_single_rag_query.py
+backend/scripts/benchmark_medqa_with_rag.py
+backend/scripts/ingest_medical_kb.py
+backend/scripts/reingest_p0_with_correct_model.py
+backend/scripts/run_p0_ingest_temp.py

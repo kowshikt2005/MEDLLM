@@ -1,27 +1,4 @@
-/**
- * Centralized API client for communicating with the FastAPI backend.
- *
- * WHY THIS FILE EXISTS:
- * Instead of every component writing its own fetch() calls with URLs,
- * headers, and error handling, they all import from here:
- *
- *   import { api } from '../services/api';
- *   const result = await api.login(email, password);
- *
- * This keeps API logic in one place. If the backend URL changes,
- * you change it here — not in 10 different components.
- *
- * HOW THE AUTH TOKEN WORKS:
- * After login/signup, we store the JWT token in localStorage.
- * Every subsequent request includes it in the Authorization header.
- * The backend reads this header to identify the user.
- */
-
-// In development, Vite's proxy forwards /api to the backend.
-// In production, this would be the actual backend URL.
 const API_BASE = '/api';
-
-// ── Token management ───────────────────────────────────
 
 function getToken() {
   return localStorage.getItem('medllm_token');
@@ -48,18 +25,14 @@ function removeUser() {
   localStorage.removeItem('medllm_user');
 }
 
-// ── Helper: build headers with auth token ──────────────
-
 function authHeaders() {
   const token = getToken();
   const headers = { 'Content-Type': 'application/json' };
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
   return headers;
 }
-
-// ── Helper: handle response errors ─────────────────────
 
 async function handleResponse(response) {
   if (!response.ok) {
@@ -68,10 +41,6 @@ async function handleResponse(response) {
   }
   return response.json();
 }
-
-// ═══════════════════════════════════════════════════════
-// AUTH API
-// ═══════════════════════════════════════════════════════
 
 async function signup(email, password, fullName, phoneNumber = null) {
   const response = await fetch(`${API_BASE}/auth/signup`, {
@@ -86,11 +55,8 @@ async function signup(email, password, fullName, phoneNumber = null) {
   });
 
   const data = await handleResponse(response);
-
-  // Store token and user info for future requests
   setToken(data.access_token);
   setUser(data.user);
-
   return data;
 }
 
@@ -102,11 +68,8 @@ async function login(email, password) {
   });
 
   const data = await handleResponse(response);
-
-  // Store token and user info
   setToken(data.access_token);
   setUser(data.user);
-
   return data;
 }
 
@@ -119,34 +82,18 @@ function isLoggedIn() {
   return !!getToken();
 }
 
-// ═══════════════════════════════════════════════════════
-// CHAT API (Streaming)
-// ═══════════════════════════════════════════════════════
-
-/**
- * Send a chat message and get a streaming response.
- *
- * HOW STREAMING WORKS ON THE FRONTEND:
- * 1. We send a POST request to /api/chat
- * 2. The response is a STREAM (not a single JSON blob)
- * 3. We read it chunk by chunk using response.body.getReader()
- * 4. Each chunk contains one or more SSE events
- * 5. We parse each event and call onToken() for each token
- *
- * @param {string} message - The user's message
- * @param {object} options - Optional: conversationId, mode, onToken callback
- * @returns {Promise<object>} - { conversationId, fullResponse }
- */
 async function chatStream(message, options = {}) {
   const {
     conversationId = null,
     mode = 'normal',
+    model = null,
     attachments = [],
     healthContext = false,
-    onToken = () => {},     // Called for each token: onToken("Diabetes")
-    onStep = () => {},      // Called for reasoning steps (Phase 4)
-    onDone = () => {},      // Called when stream completes
-    onError = () => {},     // Called on error
+    onRequest = () => {},
+    onToken = () => {},
+    onStep = () => {},
+    onDone = () => {},
+    onError = () => {},
   } = options;
 
   try {
@@ -159,82 +106,93 @@ async function chatStream(message, options = {}) {
         attachments,
         health_context: healthContext,
         mode,
+        model,
       }),
     });
 
     if (!response.ok) {
       const error = await response.text();
       onError(error);
-      return { conversationId: null, fullResponse: '' };
+      return { conversationId: null, fullResponse: '', requestId: null, cancelled: false };
     }
 
-    // Read the SSE stream
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let fullResponse = '';
     let resultConversationId = conversationId;
+    let requestId = null;
+    let cancelled = false;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      // Decode the chunk (may contain multiple SSE events)
       const text = decoder.decode(value, { stream: true });
-
-      // SSE format: each event starts with "data: " and ends with "\n\n"
       const lines = text.split('\n');
 
       for (const line of lines) {
-        // SSE lines starting with "data: " contain our JSON
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6)); // Remove "data: " prefix
+        if (!line.startsWith('data: ')) continue;
 
-            if (data.type === 'token') {
-              fullResponse += data.content;
-              onToken(data.content);
-            } else if (data.type === 'step') {
-              onStep(data.content);
-            } else if (data.type === 'done') {
-              resultConversationId = data.conversation_id;
-              // Phase 3: sources is a list like [{ source: "diabetes_guide.txt", score: 0.87 }]
-              // It's empty [] when the knowledge base has no relevant results.
-              onDone({
-                conversationId: data.conversation_id,
-                fullResponse,
-                sources: data.sources || [],
-              });
-            }
-          } catch {
-            // Skip malformed JSON (can happen with partial chunks)
+        try {
+          const data = JSON.parse(line.slice(6));
+
+          if (data.type === 'init') {
+            requestId = data.request_id || null;
+            onRequest(requestId);
+          } else if (data.type === 'token') {
+            fullResponse += data.content;
+            onToken(data.content);
+          } else if (data.type === 'step') {
+            onStep(data.content);
+          } else if (data.type === 'cancelled') {
+            cancelled = true;
+          } else if (data.type === 'done') {
+            resultConversationId = data.conversation_id;
+            requestId = data.request_id || requestId;
+            onDone({
+              conversationId: data.conversation_id,
+              fullResponse,
+              sources: data.sources || [],
+              requestId,
+              cancelled,
+            });
           }
+        } catch {
+          // Ignore partial/malformed chunks.
         }
       }
     }
 
-    return { conversationId: resultConversationId, fullResponse };
+    return { conversationId: resultConversationId, fullResponse, requestId, cancelled };
   } catch (error) {
     onError(error.message);
-    return { conversationId: null, fullResponse: '' };
+    return { conversationId: null, fullResponse: '', requestId: null, cancelled: false };
   }
 }
 
-// ═══════════════════════════════════════════════════════
-// FILE UPLOAD (Phase 2)
-// ═══════════════════════════════════════════════════════
+async function getRuntime() {
+  const response = await fetch(`${API_BASE}/runtime`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+  return handleResponse(response);
+}
 
-/**
- * Upload a file for processing (PDF, DOCX, image, text).
- *
- * This is called immediately when the user selects a file (not when they
- * send the message). The backend extracts text from the file and returns
- * an upload_id that we include with the chat message later.
- *
- * Uses FormData instead of JSON because we're sending a binary file.
- *
- * @param {File} file - The file object from the file input
- * @returns {Promise<object>} - { upload_id, filename, file_type, extracted_text }
- */
+async function cancelRequest(requestId) {
+  if (!requestId) return { cancelled: false };
+
+  try {
+    const response = await fetch(`${API_BASE}/cancel?request_id=${encodeURIComponent(requestId)}`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    return handleResponse(response);
+  } catch (error) {
+    console.error('Cancel request failed:', error);
+    return { cancelled: false };
+  }
+}
+
 async function uploadFile(file) {
   const formData = new FormData();
   formData.append('file', file);
@@ -242,10 +200,8 @@ async function uploadFile(file) {
   const token = getToken();
   const headers = {};
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
-  // Note: do NOT set Content-Type header — browser sets it automatically
-  // with the correct multipart boundary when using FormData
 
   const response = await fetch(`${API_BASE}/upload`, {
     method: 'POST',
@@ -256,16 +212,6 @@ async function uploadFile(file) {
   return handleResponse(response);
 }
 
-/**
- * Send recorded audio for speech-to-text transcription.
- *
- * The browser records audio as a WebM blob. We send it to the backend
- * where Whisper transcribes it to text. The transcribed text is then
- * placed in the chat input for the user to review before sending.
- *
- * @param {Blob} audioBlob - The recorded audio blob from MediaRecorder
- * @returns {Promise<object>} - { text, language }
- */
 async function transcribeAudio(audioBlob) {
   const formData = new FormData();
   formData.append('file', audioBlob, 'recording.webm');
@@ -273,7 +219,7 @@ async function transcribeAudio(audioBlob) {
   const token = getToken();
   const headers = {};
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   const response = await fetch(`${API_BASE}/transcribe`, {
@@ -285,35 +231,59 @@ async function transcribeAudio(audioBlob) {
   return handleResponse(response);
 }
 
-// ═══════════════════════════════════════════════════════
-// HEALTH CHECK
-// ═══════════════════════════════════════════════════════
-
 async function healthCheck() {
   const response = await fetch(`${API_BASE}/health`);
   return handleResponse(response);
 }
 
-// ═══════════════════════════════════════════════════════
-// EXPORT
-// ═══════════════════════════════════════════════════════
+async function listConversations() {
+  const response = await fetch(`${API_BASE}/conversations`, {
+    method: 'GET',
+    headers: authHeaders(),
+  });
+  return handleResponse(response);
+}
+
+async function getConversation(conversationId) {
+  const response = await fetch(`${API_BASE}/conversations/${encodeURIComponent(conversationId)}`, {
+    method: 'GET',
+    headers: authHeaders(),
+  });
+  return handleResponse(response);
+}
+
+async function getProfile() {
+  const response = await fetch(`${API_BASE}/profile`, {
+    method: 'GET',
+    headers: authHeaders(),
+  });
+  return handleResponse(response);
+}
+
+async function updateProfile(profilePayload) {
+  const response = await fetch(`${API_BASE}/profile`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(profilePayload),
+  });
+  return handleResponse(response);
+}
 
 export const api = {
-  // Auth
   signup,
   login,
   logout,
   isLoggedIn,
   getUser,
   getToken,
-
-  // Chat
   chatStream,
-
-  // File upload & transcription (Phase 2)
+  getRuntime,
+  cancelRequest,
   uploadFile,
   transcribeAudio,
-
-  // System
   healthCheck,
+  listConversations,
+  getConversation,
+  getProfile,
+  updateProfile,
 };

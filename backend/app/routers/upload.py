@@ -31,8 +31,9 @@ import uuid
 from fastapi import APIRouter, Depends, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.database import Attachment, get_db
+from app.models.database import Attachment, User, get_db
 from app.models.schemas import UploadResponse
+from app.routers.auth import get_current_user
 from app.services.document_processor import detect_file_type, extract_text, chunk_text
 from app.services import rag_service
 
@@ -50,6 +51,7 @@ BATCH_SIZE = 50
 async def upload_file(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+  current_user: User = Depends(get_current_user),
 ):
     """
     Upload and process a file (PDF, DOCX, image, or text).
@@ -110,6 +112,7 @@ async def upload_file(
     # CHANGE: Create an Attachment record with metadata only
     # No extracted_text stored — it's in ChromaDB, retrievable via RAG
     attachment = Attachment(
+      user_id=current_user.id,
         filename=file.filename,
         file_type=file_type,
         file_path=file_path,

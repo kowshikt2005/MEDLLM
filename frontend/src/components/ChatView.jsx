@@ -49,23 +49,23 @@ const Tooltip = ({ children, content }) => {
 }
 
 function ChatView() {
-  const currentDate = new Date().toLocaleString()
+  const buildWelcomeMessage = () => ({
+    sender: "MedLLM Assistant",
+    text: "Hello! I can summarize the retrieved sources available in this local project. If they do not cover a question, I will say so.",
+    date: new Date().toLocaleString(),
+    sources: [],
+    reasoningSteps: [],
+    isComplete: true,
+  })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [conversationId, setConversationId] = useState(null)
   const [isStreaming, setIsStreaming] = useState(false)
-  const [messages, setMessages] = useState([
-    {
-      sender: "MedLLM Assistant",
-      text: "Hello! I'm MedLLM, your medical AI assistant. How can I help you with your healthcare questions today?",
-      date: currentDate,
-      sources: [],          // Phase 3: RAG source citations
-      reasoningSteps: [],   // Phase 4: agentic reasoning step log
-      isComplete: true,     // Phase 4: true once streaming is done (for ReasoningSteps)
-    },
-  ])
+  const [messages, setMessages] = useState([buildWelcomeMessage()])
   const [inputText, setInputText] = useState("")
   const [selectedChatId, setSelectedChatId] = useState(null) // Track selected chat
+  const [previousChats, setPreviousChats] = useState([])
+  const [isLoadingChats, setIsLoadingChats] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [audioBlob, setAudioBlob] = useState(null)
@@ -75,6 +75,9 @@ function ChatView() {
   const [attachments, setAttachments] = useState([])  // [{id, filename, fileType, status}]
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [chatMode, setChatMode] = useState("normal")  // "normal" | "reasoning"
+  const [runtimeStatus, setRuntimeStatus] = useState(null)
+  const [selectedModel, setSelectedModel] = useState(null)
+  const [currentRequestId, setCurrentRequestId] = useState(null)
 
   const dropdownRef = useRef(null)
   const chatContainerRef = useRef(null)
@@ -87,61 +90,39 @@ function ChatView() {
   const micStreamRef = useRef(null)
   const timerRef = useRef(null)
 
-  // Sample previous chats with message history
-  const previousChats = [
-    {
-      id: 1,
-      title: "Medicare Part A Coverage",
-      date: "Apr 23, 2025",
-      messages: [
-        {
-          sender: "User",
-          text: "What does Medicare Part A cover?",
-          date: "Apr 23, 2025, 10:00 AM",
-        },
-        {
-          sender: "Medicare Assistant",
-          text: "Medicare Part A covers hospital stays, skilled nursing facility care, hospice, and some home health care.",
-          date: "Apr 23, 2025, 10:02 AM",
-        },
-      ],
-    },
-    {
-      id: 2,
-      title: "Prescription Plan Questions",
-      date: "Apr 20, 2025",
-      messages: [
-        {
-          sender: "User",
-          text: "How do I enroll in a prescription drug plan?",
-          date: "Apr 20, 2025, 2:00 PM",
-        },
-        {
-          sender: "Medicare Assistant",
-          text: "You can enroll in a Medicare Part D plan during the annual enrollment period or when you first become eligible.",
-          date: "Apr 20, 2025, 2:05 PM",
-        },
-      ],
-    },
-    {
-      id: 3,
-      title: "Doctor Referral Process",
-      date: "Apr 18, 2025",
-      messages: [
-        {
-          sender: "User",
-          text: "How do I get a referral to a specialist?",
-          date: "Apr 18, 2025, 9:00 AM",
-        },
-        {
-          sender: "Medicare Assistant",
-          text: "You may need a referral from your primary care doctor depending on your Medicare plan. Contact your plan provider for details.",
-          date: "Apr 18, 2025, 9:10 AM",
-        },
-      ],
-    },
-  ]
+  const refreshConversations = async () => {
+    try {
+      setIsLoadingChats(true)
+      const rows = await api.listConversations()
+      const mapped = (rows || []).map((chat) => ({
+        id: chat.id,
+        title: chat.title,
+        date: new Date(chat.updated_at || chat.created_at).toLocaleDateString(),
+      }))
+      setPreviousChats(mapped)
+    } catch (error) {
+      console.error("Failed to load conversations:", error)
+      setPreviousChats([])
+    } finally {
+      setIsLoadingChats(false)
+    }
+  }
 
+  useEffect(() => {
+    let active = true
+    api.getRuntime()
+      .then((status) => {
+        if (!active) return
+        setRuntimeStatus(status)
+        if (status?.selected_model && status?.selected_model_available) {
+          setSelectedModel(status.selected_model)
+        }
+      })
+      .catch(() => {
+        if (active) setRuntimeStatus(null)
+      })
+    return () => { active = false }
+  }, [])
   // Get current chat title
   const getCurrentChatTitle = () => {
     if (selectedChatId) {
@@ -160,6 +141,12 @@ function ChatView() {
     }
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    if (api.isLoggedIn()) {
+      void refreshConversations()
+    }
   }, [])
 
   // Auto-scroll to the latest message
@@ -206,6 +193,16 @@ function ChatView() {
     }
   }, [copiedMessageIndex])
 
+  // Stop current stream so the user can ask a new query immediately.
+  const handleStopRequest = async () => {
+    if (!currentRequestId) return
+    try {
+      await api.cancelRequest(currentRequestId)
+    } catch (error) {
+      console.error("Failed to cancel request:", error)
+    }
+  }
+
   // Handle sending a message — now uses real backend API with streaming
   const handleSendMessage = async () => {
     if (!inputText.trim() || isStreaming) return
@@ -247,7 +244,11 @@ function ChatView() {
     const result = await api.chatStream(userText, {
       conversationId,
       mode: chatMode,         // "normal" or "reasoning" — from toggle button
+      model: chatMode === "normal" ? selectedModel : null,
       attachments: attachmentIds,
+      onRequest: (requestId) => {
+        setCurrentRequestId(requestId)
+      },
 
       // Called for each LLM token — append to the last message's text
       onToken: (token) => {
@@ -275,7 +276,10 @@ function ChatView() {
 
       // Called once when streaming finishes — attach sources and mark complete
       onDone: (data) => {
-        if (data.conversationId) setConversationId(data.conversationId)
+        if (data.conversationId) {
+          setConversationId(data.conversationId)
+          setSelectedChatId(data.conversationId)
+        }
         setMessages((prev) => {
           const updated = [...prev]
           const lastMsg = updated[updated.length - 1]
@@ -286,6 +290,8 @@ function ChatView() {
           }
           return updated
         })
+        setCurrentRequestId(null)
+        void refreshConversations()
       },
 
       onError: (error) => {
@@ -299,6 +305,7 @@ function ChatView() {
           }
           return updated
         })
+        setCurrentRequestId(null)
       },
     })
 
@@ -366,12 +373,24 @@ function ChatView() {
   }
 
   // Handle selecting a previous chat
-  const handleSelectChat = (chatId) => {
-    const selectedChat = previousChats.find((chat) => chat.id === chatId)
-    if (selectedChat) {
-      setMessages(selectedChat.messages)
+  const handleSelectChat = async (chatId) => {
+    try {
+      const detail = await api.getConversation(chatId)
+      const loadedMessages = (detail.messages || []).map((msg) => ({
+        sender: msg.role === "user" ? "User" : "MedLLM Assistant",
+        text: msg.content,
+        date: new Date(msg.created_at).toLocaleString(),
+        sources: [],
+        reasoningSteps: [],
+        isComplete: true,
+      }))
+
+      setMessages(loadedMessages.length > 0 ? loadedMessages : [buildWelcomeMessage()])
+      setConversationId(chatId)
       setSelectedChatId(chatId)
       setSidebarOpen(false) // Close sidebar on mobile after selection
+    } catch (error) {
+      console.error("Failed to load conversation:", error)
     }
   }
 
@@ -585,6 +604,10 @@ function ChatView() {
               <h3 className="font-semibold text-teal-800 text-lg">Your Conversations</h3>
             </div>
             <div className="p-4">
+              {isLoadingChats && <div className="text-sm text-gray-500 mb-3">Loading conversations...</div>}
+              {!isLoadingChats && previousChats.length === 0 && (
+                <div className="text-sm text-gray-500 mb-3">No saved conversations yet.</div>
+              )}
               {previousChats.map((chat) => (
                 <div
                   key={chat.id}
@@ -602,14 +625,9 @@ function ChatView() {
               <button
                 className="w-full mt-4 p-3 bg-teal-700 text-white rounded-lg hover:bg-teal-800 transition-colors"
                 onClick={() => {
+                  setConversationId(null)
                   setSelectedChatId(null)
-                  setMessages([
-                    {
-                      sender: "Medicare Assistant",
-                      text: "Hello, I am a Medicare assistance agent. How may I help you with your healthcare needs today?",
-                      date: new Date().toLocaleString(),
-                    },
-                  ])
+                  setMessages([buildWelcomeMessage()])
                   setSidebarOpen(false)
                 }}
               >
@@ -664,7 +682,7 @@ function ChatView() {
                     <button
                       onClick={() => {
                         console.log("Logout clicked")
-                        localStorage.removeItem("authToken")
+                        api.logout()
                         window.location.href = "/login"
                       }}
                       className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100"
@@ -892,6 +910,18 @@ function ChatView() {
                     </button>
                   </Tooltip>
 
+                  {chatMode === "normal" && runtimeStatus?.models?.length > 0 && (
+                    <select
+                      value={selectedModel || ""}
+                      onChange={(event) => setSelectedModel(event.target.value || null)}
+                      className="h-10 max-w-40 rounded-md border border-gray-200 bg-gray-50 px-2 text-xs text-gray-700"
+                      aria-label="Select local Ollama model"
+                    >
+                      {runtimeStatus.models.map((model) => (
+                        <option key={model.name} value={model.name}>{model.name}</option>
+                      ))}
+                    </select>
+                  )}
                   {/* Phase 4: Mode toggle — Normal vs Reasoning */}
                   <Tooltip content={chatMode === "reasoning" ? "Switch to Normal mode" : "Switch to Reasoning mode (slower, more thorough)"}>
                     <button
@@ -907,6 +937,19 @@ function ChatView() {
                     </button>
                   </Tooltip>
                 </div>
+
+                {isStreaming && (
+                  <Tooltip content="Stop current response">
+                    <button
+                      onClick={handleStopRequest}
+                      className="inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none h-full px-3 bg-red-100 hover:bg-red-200 text-red-700 border border-red-300"
+                      aria-label="Stop response"
+                    >
+                      <Square size={16} />
+                    </button>
+                  </Tooltip>
+                )}
+
                 <button
                   onClick={handleSendMessage}
                   disabled={!inputText.trim() || isStreaming}

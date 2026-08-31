@@ -26,18 +26,29 @@ class Settings(BaseSettings):
 
     # ── Ollama (local LLM) ───────────────────────────────
     ollama_host: str = "http://localhost:11434"
-    ollama_model: str = "medllama:latest"
+    ollama_model: str = "mistral:latest"
+    ollama_baseline_identifier: str = "6577803aa9a0"
 
     # ── Groq (reasoning mode — optional) ─────────────────
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    # Temperature for medical answers (low = more factual)
+    llm_temperature: float = 0.1
+    reasoning_plan_timeout_seconds: int = 25
+    reasoning_research_timeout_seconds: int = 120
+    reasoning_synthesis_timeout_seconds: int = 120
+    reasoning_local_fallback_timeout_seconds: int = 45
+    reasoning_progress_heartbeat_seconds: int = 8
+    reasoning_verbose_output: bool = True
 
     # ── Whisper (speech-to-text) ─────────────────────────
     whisper_model: str = "small"
 
     # ── RAG ──────────────────────────────────────────────
     chroma_persist_dir: str = "./data/chroma_db"
-    embedding_model: str = "all-MiniLM-L6-v2"
+    # Use a higher-quality embedding model for medical retrieval
+    # NOTE: re-ingest your knowledge base after changing embeddings
+    embedding_model: str = "BAAI/bge-large-en-v1.5"
 
     model_config = {
         "env_file": ".env",

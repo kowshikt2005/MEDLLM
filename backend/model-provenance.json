@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "recorded_on": "2026-08-31",
+  "baseline": {
+    "ollama_model": "mistral:latest",
+    "ollama_list_identifier": "6577803aa9a0",
+    "modelfile_from_blob_sha256": "f5074b1221da0f5a2910d33b642efa5b9eb58cfdddca1c79e16d7ad28aa2b31f",
+    "architecture": "llama",
+    "parameters": "7.2B",
+    "context_length": 32768,
+    "quantization": "Q4_K_M",
+    "license": "Apache License 2.0"
+  },
+  "selection_policy": "Normal chat accepts any installed Ollama completion model selected by the user. Record its Ollama identifier and evaluate it under a controlled local protocol before treating it as a project baseline.",
+  "quality_claim": "No medical reliability or accuracy claim is made for this model.",
+  "retired_models": {
+    "medllama:latest": "Retired for this project after poor observed accuracy and unacceptable hallucinations. Do not restore, select, or recommend it."
+  },
+  "verification": {
+    "inventory_command": "ollama list",
+    "details_command": "ollama show mistral:latest --modelfile",
+    "runtime_endpoint": "GET /api/runtime"
+  }
+}

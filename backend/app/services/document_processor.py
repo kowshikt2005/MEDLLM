@@ -19,11 +19,14 @@ How it fits in the pipeline:
 
 import hashlib
 import os
+import json
 
 import pdfplumber
 import pytesseract
 from docx import Document
 from PIL import Image
+
+from app.services.lab_utils import is_lab_pdf, extract_lab_tests, format_lab_json
 
 
 # CHANGE: File-type aware chunk configuration
@@ -77,9 +80,16 @@ def _extract_pdf(file_path: str) -> str:
     text_parts = []
     with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
-            page_text = page.extract_text()
+            page_text = (page.extract_text() or "").strip()
             if page_text:
                 text_parts.append(page_text)
+                continue
+
+            # Render only pages without selectable text for scanned-PDF OCR.
+            page_image = page.to_image(resolution=300).original
+            ocr_text = pytesseract.image_to_string(page_image).strip()
+            if ocr_text:
+                text_parts.append(ocr_text)
     return "\n\n".join(text_parts)
 
 
@@ -138,6 +148,41 @@ def detect_file_type(filename: str) -> str:
         return "unknown"
 
 
+def detect_document_type(text: str) -> str:
+    """
+    Classify the document type based on content.
+    
+    Returns one of: "lab_report", "narrative", "mixed"
+    """
+    if is_lab_pdf(text):
+        return "lab_report"
+    # Could extend for other document types here (e.g., "radiology_report", "pathology")
+    return "narrative"
+
+
+def extract_lab_data_for_chunk(text: str) -> dict | None:
+    """
+    Extract structured lab data from text.
+    
+    If the text contains lab tests, returns a dict with:
+      - lab_tests: list of LabTest dicts
+      - lab_json: JSON-formatted lab data
+    
+    Returns None if no lab tests found.
+    """
+    tests = extract_lab_tests(text)
+    if not tests:
+        return None
+    
+    return {
+        "lab_tests": [t.to_dict() for t in tests],
+        "lab_json": format_lab_json(tests),
+        "has_abnormal": any(t.is_abnormal for t in tests),
+        "critical_count": sum(1 for t in tests if t.abnormality_type == "CRITICAL"),
+    }
+
+
+
 # CHANGE: New function to chunk text with file-type aware sizing
 def chunk_text(
     text: str,
@@ -152,6 +197,11 @@ def chunk_text(
       - DOCX: 1000 chars, 150 overlap (narrative, medium density)
       - Text/CSV/MD: 800 chars, 120 overlap (often dense)
       - Image (OCR): 700 chars, 100 overlap (less reliable, use smaller chunks)
+
+    CHANGE: Also detects lab reports and adds lab metadata:
+      - document_type: "lab_report" or "narrative"
+      - is_lab_pdf: boolean
+      - lab_data: structured lab tests (if lab report)
 
     Returns three parallel lists (same length, same indices):
       texts:     the actual chunk content
@@ -171,6 +221,15 @@ def chunk_text(
     chunk_size = config["chunk_size"]
     chunk_overlap = config["overlap"]
 
+    # CHANGE: Detect if this is a lab report
+    document_type = detect_document_type(text)
+    is_lab = document_type == "lab_report"
+    
+    # CHANGE: Extract structured lab data if present
+    lab_data = None
+    if is_lab:
+        lab_data = extract_lab_data_for_chunk(text)
+
     texts = []
     metadatas = []
     ids = []
@@ -188,12 +247,22 @@ def chunk_text(
             content_hash = hashlib.md5(chunk.encode()).hexdigest()[:8]
             chunk_id = f"{source_name}_chunk_{chunk_index}_{content_hash}"
 
-            texts.append(chunk)
-            metadatas.append({
+            metadata = {
                 "source": source_name,
                 "chunk_index": chunk_index,
                 "file_type": file_type,  # CHANGE: Track original file type
-            })
+                "document_type": document_type,  # CHANGE: "lab_report" or "narrative"
+                "is_lab_pdf": is_lab,  # CHANGE: Boolean flag for lab reports
+            }
+            
+            # CHANGE: Add structured lab data to metadata
+            if lab_data:
+                metadata["lab_data"] = lab_data
+                metadata["has_abnormal"] = lab_data.get("has_abnormal", False)
+                metadata["critical_count"] = lab_data.get("critical_count", 0)
+            
+            texts.append(chunk)
+            metadatas.append(metadata)
             ids.append(chunk_id)
             chunk_index += 1
 

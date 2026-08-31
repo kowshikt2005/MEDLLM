@@ -30,10 +30,27 @@ class LLMService:
         self.client = ollama.Client(host=settings.ollama_host)
         self.model = settings.ollama_model
 
+    @staticmethod
+    def _is_runner_terminated_error(message: str) -> bool:
+        """Detect Ollama's GPU runner crash signature."""
+        text = (message or "").lower()
+        return "llama runner process has terminated" in text
+
+    def _chat_request(self, full_messages: list[dict], stream: bool, force_cpu: bool = False, model: str | None = None):
+        """Execute one Ollama chat request with optional CPU-only fallback settings."""
+        options = {"num_gpu": 0} if force_cpu else None
+        return self.client.chat(
+            model=model or self.model,
+            messages=full_messages,
+            stream=stream,
+            options=options,
+        )
+
     async def chat_stream(
         self,
         messages: list[dict],
         system_prompt: str = "",
+        model: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Send messages to Ollama and yield response tokens one at a time.
@@ -63,11 +80,7 @@ class LLMService:
 
         try:
             # stream=True tells Ollama to send tokens as they're generated
-            stream = self.client.chat(
-                model=self.model,
-                messages=full_messages,
-                stream=True,
-            )
+            stream = self._chat_request(full_messages, stream=True, force_cpu=False, model=model)
 
             # Each chunk from the stream contains one token
             for chunk in stream:
@@ -76,7 +89,24 @@ class LLMService:
                     yield token
 
         except ollama.ResponseError as e:
-            # Model not found or Ollama returned an error
+            # Retry on CPU when GPU runner crashes.
+            if self._is_runner_terminated_error(e.error):
+                print("[LLM] GPU runner failed. Retrying request on CPU...", flush=True)
+                try:
+                    stream = self._chat_request(full_messages, stream=True, force_cpu=True, model=model)
+                    for chunk in stream:
+                        token = chunk["message"]["content"]
+                        if token:
+                            yield token
+                    return
+                except Exception as fallback_error:
+                    yield (
+                        "\n\n[Error: Ollama GPU runner crashed and CPU fallback also failed — "
+                        f"{str(fallback_error)}]"
+                    )
+                    return
+
+            # Model not found or other Ollama errors
             yield f"\n\n[Error: Ollama returned an error — {e.error}]"
         except Exception as e:
             # Ollama not running or network issue
@@ -86,6 +116,7 @@ class LLMService:
         self,
         messages: list[dict],
         system_prompt: str = "",
+        model: str | None = None,
     ) -> str:
         """
         Send messages to Ollama and get the FULL response at once.
@@ -103,14 +134,17 @@ class LLMService:
         full_messages.extend(messages)
 
         try:
-            response = self.client.chat(
-                model=self.model,
-                messages=full_messages,
-                stream=False,
-            )
+            response = self._chat_request(full_messages, stream=False, force_cpu=False, model=model)
             return response["message"]["content"]
 
         except ollama.ResponseError as e:
+            if self._is_runner_terminated_error(e.error):
+                print("[LLM] GPU runner failed. Retrying request on CPU...", flush=True)
+                try:
+                    response = self._chat_request(full_messages, stream=False, force_cpu=True, model=model)
+                    return response["message"]["content"]
+                except Exception as fallback_error:
+                    return f"[Error: Ollama GPU runner crashed and CPU fallback also failed — {str(fallback_error)}]"
             return f"[Error: Ollama returned an error — {e.error}]"
         except Exception as e:
             return f"[Error: Could not connect to Ollama at {settings.ollama_host}. Is Ollama running? Error: {str(e)}]"

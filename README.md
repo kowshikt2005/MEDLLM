@@ -1,159 +1,70 @@
-# MedLLM — Multimodal Medical AI Assistant
+# MedLLM
 
-A project for my practical knowledge and experience on LLM applications.
+MedLLM is a FastAPI and React desktop application for experimenting with local LLM chat, document retrieval, and multimodal text extraction.
 
-MedLLM is a full-stack medical AI assistant that combines local LLM inference, a RAG pipeline, and multimodal input processing. The current default runtime model is `medllama:latest` via Ollama.
+## Current capabilities
 
-## What It Does
+- Local chat through any installed Ollama completion model, selected in normal mode or with `OLLAMA_MODEL`.
+- ChromaDB retrieval using sentence-transformers and cross-encoder reranking.
+- PDF, DOCX, image-OCR, and text-file ingestion.
+- Browser-recorded audio transcribed locally with OpenAI Whisper.
+- Optional reasoning mode: Groq plans and synthesizes; Ollama and Chroma handle focused retrieval steps.
+- Server-Sent Events for streamed replies and source labels with retrieval-relevance scores.
 
-- **Medical Q&A** - Ask health-related questions and get streaming responses from a locally running LLM
-- **Multimodal Input** - Upload PDFs, images, documents, or use voice; content is converted to text and fed into retrieval + generation
-- **RAG Pipeline** - Retrieves relevant medical knowledge from ChromaDB and returns source-backed answers
-- **Reasoning Mode** - Breaks complex questions into sub-queries, retrieves evidence for each, and synthesizes a clinician-style answer
-- **Source Citations** - Returns deduplicated sources with bounded confidence scores in the chat UI
+## Scope and limitations
 
-## Architecture
+- Normal mode answers only when retrieved source excerpts support the question; otherwise it returns a clear abstention without calling the chat model.
+- Source labels show retrieval relevance, not factual certainty or a confidence score.
+- The optional reasoning mode sends the question and generated research summaries to Groq; it remains a separate cloud-assisted experiment rather than the normal evidence-gated path.
+- The repository does not publish a medical-accuracy benchmark or a currentness guarantee.
+- The legacy `medllama:latest` default is not supplied. Set `OLLAMA_MODEL` to a locally installed Ollama chat model.
+- Three SHA-256-pinned CDC source cards cover diabetes and high blood pressure. The generated Chroma index is local and is not tracked in Git.
 
-```
-React Frontend (Vite + Tailwind)
-       |
-       v
-FastAPI Backend (Python)
-       |
-  +----+--------------+
-  |    |              |
-  v    v              v
-Ollama   ChromaDB    Whisper
-(LLM)    (RAG)       (Voice STT)
-  |
-  +-- medllama:latest (current default model)
-```
+## Run locally
 
-**Multimodal Processing:**
-```
-Voice  --> faster-whisper --> text --+
-Image  --> pytesseract OCR --> text -+
-PDF    --> pdfplumber ------> text --+--> RAG retrieval --> LLM --> streaming response
-DOCX   --> python-docx -----> text -+
-Text   ---------------------------------+
-```
+Requirements: Python 3.11+, Node.js 18+, Ollama, and Tesseract for image/scanned-PDF OCR.
 
-## Tech Stack
+1. Copy `backend/.env.example` to `backend/.env`, then set `OLLAMA_MODEL` to an exact model shown by `ollama list`.
+2. In `backend`, create and activate a Python virtual environment, install `requirements.txt`, and run `python -m uvicorn app.main:app --reload`. Confirm the selected model is available at `http://localhost:8000/api/runtime`.
+3. In `frontend`, run `npm install` and `npm run dev`.
+4. Open `http://localhost:5173`.
 
-| Layer | Tech |
-|---|---|
-| Frontend | React, Vite, Tailwind CSS |
-| Backend | FastAPI, SQLAlchemy, SQLite |
-| LLM Inference | Ollama (local), medllama:latest (default) |
-| Auth | JWT (python-jose) + bcrypt (passlib) |
-| Streaming | Server-Sent Events (SSE) |
-| RAG | ChromaDB + sentence-transformers + CrossEncoder reranking |
-| Voice | faster-whisper (STT) |
-| Document Processing | pdfplumber, pytesseract, python-docx |
-| Optional Cloud Model | Groq (used by reasoning mode when configured) |
+The first use of Whisper, sentence-transformers, or the reranker can download their model files. Install the Tesseract desktop binary before using image or scanned-PDF OCR. Groq is optional; leave `GROQ_API_KEY` unset to use normal mode only.
 
-## Project Structure
+## Model provenance
 
-```
-MEDLLM/
-├── frontend/              # React + Vite + Tailwind
-│   ├── src/
-│   │   ├── components/    # UI components (Chat, Auth, Dashboard, etc.)
-│   │   └── services/      # API client with SSE streaming
-│   └── package.json
-├── backend/               # FastAPI
-│   ├── app/
-│   │   ├── main.py        # App entry point, CORS, health check
-│   │   ├── config.py      # Environment config via pydantic-settings
-│   │   ├── models/        # SQLAlchemy models + Pydantic schemas
-│   │   ├── routers/       # API endpoints (auth, chat)
-│   │   ├── services/      # LLM client, RAG, document processing
-│   │   └── prompts/       # System prompts and templates
-│   └── requirements.txt
-├── PLAN.md                # Implementation roadmap
-└── CHANGELOG.md           # Detailed development log
-```
+`backend/model-provenance.json` records the locally observed `mistral:latest` baseline identifier, blob digest, configuration, and license. It is a reproducibility record, not a performance or medical-quality result. Normal mode may use another installed Ollama completion model, but that choice should be recorded and checked under a controlled local evaluation before becoming a new baseline.
 
-## Getting Started
+## Curated corpus
 
-### Prerequisites
+The initial corpus is limited to three attributed CDC source cards on diabetes and high blood pressure. Verify their pinned content, then build or replace only the generated curated Chroma chunks:
 
-- Python 3.11+
-- Node.js 18+
-- [Ollama](https://ollama.com/) installed and running
-
-### Setup
-
-**1. Pull the current local model:**
-```bash
-ollama pull medllama:latest
-```
-
-**2. Start the backend:**
-```bash
+```powershell
 cd backend
-python -m venv venv
-# Windows PowerShell
-.\venv\Scripts\Activate.ps1
-# Windows CMD
-# venv\Scripts\activate.bat
-# Mac/Linux
-# source venv/bin/activate
-pip install -r requirements.txt
-python -m uvicorn app.main:app --reload
+python scripts/build_curated_index.py --verify-only
+python scripts/build_curated_index.py --replace-curated
 ```
 
-**3. Start the frontend:**
-```bash
-cd frontend
-npm install
-npm run dev
+The rebuild preserves user-uploaded chunks because it deletes only records marked `corpus=curated`. Review the original CDC pages before changing a source card, update its manifest digest, and rebuild. The cards are educational summaries with direct source links, not a claim that the app provides medical reliability.
+
+## Project layout
+
+```text
+frontend/                  React and Vite interface
+backend/app/               FastAPI routes, services, prompts, and models
+backend/app/services/      Ollama, retrieval, documents, and transcription
+backend/scripts/           One-off maintenance and evaluation scripts
+PLAN.md                    Current roadmap
+CHANGELOG.md               Historical implementation notes
 ```
 
-**4. Open the app:**
-Visit `http://localhost:5173`
+## Next checks
 
-## Current Runtime Settings
+1. Select any new local model only after recording its provenance and controlled local evaluation results.
+2. Run a manual desktop smoke test for model selection, grounded answers, abstention, source links, uploads, and scanned-PDF OCR.
+3. Expand the curated corpus only through reviewed source cards with updated hashes and rebuild evidence.
 
-These are the active defaults in this workspace:
+The repository includes a QLoRA exploration notebook. It does not include a trained adapter, GGUF export, Modelfile, or reproducible fine-tuning result.
+## Local runtime troubleshooting
 
-- `OLLAMA_HOST=http://localhost:11434`
-- `OLLAMA_MODEL=medllama:latest`
-- `WHISPER_MODEL=small`
-- `DEBUG=true`
-- Groq is optional and used for reasoning-mode remote inference when enabled.
-
-Behavior notes:
-
-- Normal chat mode emits step/progress events over SSE.
-- Assistant output is clinician-facing and formatted for readability.
-- Citations are deduplicated and shown with clamped confidence percentages.
-
-## Benchmarks
-
-Model accuracy on [MedQA USMLE](https://huggingface.co/datasets/GBaker/MedQA-USMLE-4-options), evaluated with `backend/scripts/benchmark_medqa.py` at `temperature=0`.
-
-Run commands:
-
-```bash
-cd backend
-.\venv\Scripts\python.exe scripts\benchmark_medqa.py --provider ollama --model medllama:latest --n 100
-.\venv\Scripts\python.exe scripts\benchmark_medqa.py --compare
-```
-
-| Model | Where it runs | MedQA Accuracy | Notes |
-|---|---|---|---|
-| Random guessing | — | 25.0% | 4-option baseline |
-| **medllama:latest** | Local via Ollama | **4.0%** | Current default model · 2026-04-18 (100Q, 83 unparseable) |
-| **Mistral-7B** (base) | Local via Ollama | **47.0%** | Pre fine-tune · 2026-03-29 |
-| Human passing threshold | — | ~60.0% | USMLE Step 1 pass mark |
-| **LLaMA-3.3-70B** | Groq cloud API | **75.0%** | 10× larger model · 2026-03-29 |
-
-## Implementation Phases
-
-- [x] **Phase 1** — Backend foundation + text chat with streaming
-- [x] **Phase 2** — Multimodal input (PDF, image OCR, voice transcription)
-- [x] **Phase 3** — RAG pipeline with ChromaDB
-- [x] **Phase 4** — Reasoning / agent mode via free API (Groq/Gemini)
-- [ ] **Phase 5** — Optional QLoRA fine-tuning on medical data
-- [ ] **Phase 6** — Profile, history, polish, Docker deployment
+If Ollama reports `llama runner process has terminated` on Windows, this checkout includes `backend/scripts/start_ollama_stable.ps1` for selecting a stable GPU backend or CPU fallback. This is runtime troubleshooting only; it does not establish model quality.

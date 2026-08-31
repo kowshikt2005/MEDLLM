@@ -16,6 +16,7 @@ The token contains: {"sub": "user-uuid", "exp": 1234567890}
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import select
@@ -26,6 +27,7 @@ from app.models.database import User, get_db
 from app.models.schemas import LoginRequest, SignupRequest, TokenResponse, UserResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+bearer_scheme = HTTPBearer(auto_error=False)
 
 # ── Password hashing ────────────────────────────────────
 # bcrypt is a one-way hashing algorithm. You can turn a password INTO a hash,
@@ -64,9 +66,7 @@ def create_access_token(user_id: str) -> str:
 
 # ── JWT token verification (used as a FastAPI dependency) ─
 async def get_current_user(
-    # FastAPI's Depends() system will be wired up in main.py
-    # For now, this function extracts the user from the token
-    token: str = "",
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """
@@ -78,6 +78,11 @@ async def get_current_user(
         detail="Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    if not credentials or not credentials.credentials:
+        raise credentials_exception
+
+    token = credentials.credentials
 
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])

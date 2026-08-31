@@ -56,6 +56,7 @@ class ChatRequest(BaseModel):
     attachments: list[str] = []  # List of upload IDs (for multimodal — Phase 2)
     health_context: bool = False  # Whether to include user's health profile in prompt
     mode: str = "normal"  # "normal" or "reasoning" (Phase 4)
+    model: str | None = None  # Optional installed Ollama model for normal mode
 
 
 class MessageResponse(BaseModel):

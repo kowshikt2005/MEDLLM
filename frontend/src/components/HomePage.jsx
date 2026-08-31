@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { motion, useScroll, useTransform } from "framer-motion"
 import { Link } from "react-router-dom"
 import {
@@ -24,113 +24,84 @@ function HomePage() {
   const y = useTransform(scrollY, [0, 300], [0, -50])
   const opacity = useTransform(scrollY, [0, 300], [1, 0])
   const [profileUpdated, setProfileUpdated] = useState(false)
-  const [activeTestimonial, setActiveTestimonial] = useState(0)
 
   // Parallax effect for background elements
   const bgParallax1 = useTransform(scrollY, [0, 1000], [0, -150])
   const bgParallax2 = useTransform(scrollY, [0, 1000], [0, -100])
 
-  useEffect(() => {
-    // Testimonial rotation
-    const interval = setInterval(() => {
-      setActiveTestimonial((prev) => (prev + 1) % testimonials.length)
-    }, 5000)
-
-    return () => clearInterval(interval)
-  }, [])
 
   const features = [
     {
       icon: Brain,
-      title: "Advanced AI Diagnostics",
+      title: "Local model experimentation",
       description:
-        "Our cutting-edge LLM technology analyzes medical data with unprecedented accuracy, providing insights that might be missed in traditional diagnostics.",
+        "Choose an installed Ollama completion model and check its availability before starting normal chat.",
     },
     {
       icon: Shield,
-      title: "Multimodal inputs",
+      title: "Multimodal input pipeline",
       description:
-        "This model could take text,image and any document as input for anylysis",
+        "The project accepts PDF, DOCX, text, images with OCR, and browser-recorded audio for local processing.",
     },
     {
       icon: Activity,
-      title: "Real-time Monitoring",
+      title: "Grounded normal mode",
       description:
-        "Continuous health tracking with personalized recommendations based on your unique medical profile and latest health research.",
+        "Normal chat uses retrieved excerpts only and abstains when the current sources do not support a question.",
     },
     {
       icon: FileText,
-      title: "Comprehensive Reports",
+      title: "Visible source links",
       description:
-        "Detailed medical reports with visualized data and plain-language explanations of complex medical concepts.",
+        "Retrieved references show their title, source type, relevance signal, and direct source link when available.",
     },
     {
       icon: Microscope,
-      title: "Research-Backed Insights",
+      title: "Pinned starter corpus",
       description:
-        "Our RAG system continuously integrates the latest medical research to provide evidence-based recommendations.",
+        "Three reviewed CDC source cards for diabetes and high blood pressure can be verified and rebuilt locally.",
     },
     {
       icon: Stethoscope,
-      title: "Physician Collaboration",
+      title: "Explicit limits",
       description:
-        "Seamlessly share insights with your healthcare providers to enhance your medical care coordination.",
+        "The project does not provide diagnoses, treatment plans, medical accuracy scores, or a currentness guarantee.",
     },
   ]
 
   const workflowSteps = [
     {
       icon: FileText,
-      title: "Upload Medical Data",
-      description: "Securely upload your medical records, test results, and imaging scans.",
+      title: "Choose a question or document",
+      description: "Use the small curated source set or attach a document for local retrieval.",
     },
     {
       icon: Brain,
-      title: "AI Analysis",
-      description: "Our advanced LLM processes your data using RAG technology to extract meaningful insights.",
+      title: "Select a local model",
+      description: "Normal mode checks the selected Ollama model before it starts generation.",
     },
     {
       icon: HeartPulse,
-      title: "Personalized Diagnostics",
-      description: "Receive detailed diagnostic insights tailored to your specific health profile.",
+      title: "Retrieve excerpts",
+      description: "Chroma finds relevant chunks and passes their source metadata to the answer flow.",
     },
     {
       icon: Pill,
-      title: "Treatment Recommendations",
-      description: "Get evidence-based treatment options and preventive care suggestions.",
+      title: "Read supported content",
+      description: "Answers are limited to retrieved evidence and show the retrieved references below the response.",
     },
     {
       icon: Clock,
-      title: "Follow-up Monitoring",
-      description: "Continuous monitoring and adjustments based on your progress and new data.",
+      title: "Abstain on gaps",
+      description: "If no source supports a question, normal mode says so instead of filling the gap from general knowledge.",
     },
   ]
 
-  const testimonials = [
-    {
-      quote:
-        "MedLLM helped identify a rare condition that my doctors had missed for years. The personalized insights were life-changing.",
-      author: "Sarah J., Patient",
-      rating: 5,
-    },
-    {
-      quote:
-        "As a physician, I've found MedLLM to be an invaluable second opinion. It helps me catch details I might otherwise overlook.",
-      author: "Dr. Michael Chen, Cardiologist",
-      rating: 5,
-    },
-    {
-      quote:
-        "The integration of latest research with my personal health data provided insights that significantly improved my treatment plan.",
-      author: "Robert T., Patient",
-      rating: 5,
-    },
-  ]
 
   const stats = [
-    { value: "80.0%", label: "Diagnostic Accuracy" },
-    { value: "Uptodate", label: "Medical Papers Analyzed" },
-    { value: "Robust", label: "Compared to Traditional Methods" },
+    { value: "3", label: "Reviewed CDC source cards" },
+    { value: "6", label: "Initial curated index chunks" },
+    { value: "Local", label: "Ollama normal-chat runtime" },
   ]
 
   return (
@@ -166,8 +137,8 @@ function HomePage() {
               transition={{ duration: 0.8 }}
               className="text-5xl md:text-7xl font-bold text-gray-900 mb-6"
             >
-              The Future of
-              <span className="text-[#4f8684] block mt-2">Medical Diagnostics</span>
+              Source-Grounded
+              <span className="text-[#4f8684] block mt-2">Local RAG Exploration</span>
             </motion.h1>
 
             <motion.p
@@ -176,8 +147,7 @@ function HomePage() {
               transition={{ duration: 0.8, delay: 0.2 }}
               className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto"
             >
-              Experience healthcare powered by advanced AI, providing personalized medical insights and recommendations
-              based on your unique health profile and the latest medical research.
+              Explore a local model, retrieval, and document-processing workflow. Normal mode uses only retrieved sources and states when the current corpus cannot support an answer.
             </motion.p>
 
             <motion.div
@@ -219,7 +189,7 @@ function HomePage() {
               className="flex flex-wrap justify-center gap-4 mt-12"
             >
               <div className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full shadow-md text-sm text-gray-700 flex items-center">
-                <CheckCircle2 className="h-4 w-4 mr-2 text-teal-600" /> Clinically Validated
+                <CheckCircle2 className="h-4 w-4 mr-2 text-teal-600" /> Source-grounded normal mode
               </div>
               <div className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full shadow-md text-sm text-gray-700 flex items-center">
                 <Brain className="h-4 w-4 mr-2 text-teal-600" /> AI-Powered
@@ -268,12 +238,11 @@ function HomePage() {
               className="text-center mb-16"
             >
               <div className="inline-block px-3 py-1 bg-teal-100 text-teal-800 rounded-full text-sm font-medium mb-4">
-                Powerful Features
+                Prototype capabilities
               </div>
-              <h2 className="text-4xl font-bold text-gray-900 mb-4">Why Choose MedLLM?</h2>
+              <h2 className="text-4xl font-bold text-gray-900 mb-4">What this project demonstrates</h2>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                Revolutionizing healthcare with AI-powered insights that combine the latest medical research with your
-                personal health data
+                A local, inspectable workflow for model selection, retrieval, source attribution, and abstention.
               </p>
             </motion.div>
 
@@ -314,7 +283,7 @@ function HomePage() {
               </div>
               <h2 className="text-4xl font-bold text-gray-900 mb-4">How MedLLM Works</h2>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                Our streamlined process combines your medical data with advanced AI to deliver personalized insights
+                The normal path checks a local model, retrieves source excerpts, and either answers from them or abstains.
               </p>
             </motion.div>
 
@@ -366,15 +335,14 @@ function HomePage() {
                 </div>
                 <h2 className="text-4xl font-bold text-gray-900 mb-6">Powered by Retrieval-Augmented Generation</h2>
                 <p className="text-gray-600 mb-6 leading-relaxed">
-                  MedLLM combines the power of large language models with a vast knowledge base of medical literature,
-                  clinical guidelines, and real-time data to provide accurate, personalized medical insights.
+                  MedLLM combines a locally selected language model with a small, reviewable Chroma index. The normal path does not use general knowledge to fill retrieval gaps.
                 </p>
                 <ul className="space-y-4">
                   {[
-                    "Processes complex medical data including patient records, lab results, and imaging scans",
-                    "Provides evidence-based recommendations with citations to medical literature",
-                    "Explains complex medical concepts in easy-to-understand language",
-                    "Identifies patterns and correlations that might be missed in traditional analysis",
+                    "Processes PDF, DOCX, text, image-OCR, and browser-recorded audio inputs",
+                    "Shows retrieved source labels and direct links where source metadata includes a URL",
+                    "Uses a three-card CDC starter corpus that can be verified by SHA-256 and rebuilt locally",
+                    "Returns a fixed abstention when the retrieved sources do not support the question",
                   ].map((item, index) => (
                     <li key={index} className="flex items-start">
                       <CheckCircle2 className="h-5 w-5 text-teal-600 mr-2 mt-0.5 flex-shrink-0" />
@@ -401,29 +369,20 @@ function HomePage() {
                     <div className="space-y-4">
                       <div className="bg-gray-100 rounded-lg p-3">
                         <p className="text-gray-800 font-mono text-sm">
-                          <span className="text-purple-600">Patient:</span> I've been experiencing frequent headaches
-                          and fatigue for the past month.
+                          <span className="text-purple-600">Question:</span> What does the available source say about
+                          high blood pressure?
                         </p>
                       </div>
                       <div className="bg-teal-50 rounded-lg p-3">
                         <p className="text-gray-800 font-mono text-sm">
-                          <span className="text-teal-600">MedLLM:</span> Based on your symptoms and medical history,
-                          I've identified several potential causes. Your recent blood work shows slightly low iron
-                          levels which could contribute to fatigue.
+                          <span className="text-teal-600">MedLLM:</span> I will answer only from retrieved excerpts
+                          and show the references used below this response.
                         </p>
                       </div>
                       <div className="bg-teal-50 rounded-lg p-3">
                         <p className="text-gray-800 font-mono text-sm">
-                          <span className="text-teal-600">MedLLM:</span> According to recent research in the Journal of
-                          Neurology (2023), your symptom pattern is consistent with tension headaches, possibly
-                          exacerbated by the screen time increase noted in your activity logs.
-                        </p>
-                      </div>
-                      <div className="bg-teal-50 rounded-lg p-3">
-                        <p className="text-gray-800 font-mono text-sm">
-                          <span className="text-teal-600">MedLLM:</span> Recommended actions: 1) Iron-rich diet or
-                          supplements, 2) Regular screen breaks using the 20-20-20 rule, 3) Stress management
-                          techniques. Would you like detailed information on any of these recommendations?
+                          <span className="text-teal-600">MedLLM:</span> If the retrieved sources do not support the
+                          question, I will abstain rather than add unsupported information.
                         </p>
                       </div>
                     </div>
@@ -448,10 +407,9 @@ function HomePage() {
               viewport={{ once: true }}
               className="text-center text-white max-w-3xl mx-auto"
             >
-              <h2 className="text-4xl font-bold mb-6">Ready to Transform Your Healthcare Experience?</h2>
+              <h2 className="text-4xl font-bold mb-6">Explore the local retrieval workflow</h2>
               <p className="text-xl mb-8">
-                Complete your health profile for personalized medical insights and recommendations backed by the latest
-                research and AI technology.
+                Choose a local model, inspect the retrieved sources, and test the grounded answer and abstention behavior.
               </p>
               <div className="flex flex-col sm:flex-row justify-center gap-4">
                 <Link
@@ -487,31 +445,31 @@ function HomePage() {
               </div>
               <h2 className="text-4xl font-bold text-gray-900 mb-4">Frequently Asked Questions</h2>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                Everything you need to know about MedLLM and how it can help you
+                How the local retrieval workflow behaves and where its evidence boundary stops
               </p>
             </motion.div>
 
             <div className="max-w-3xl mx-auto">
               {[
                 {
-                  question: "How accurate is MedLLM's diagnostic assistance?",
+                  question: "What happens when the sources do not cover a question?",
                   answer:
-                    "MedLLM achieves 99.8% accuracy in diagnostic assistance when compared to expert consensus. Our system is continuously trained on the latest medical research and validated by leading healthcare professionals. However, MedLLM is designed to assist healthcare providers, not replace them.",
+                    "Normal mode returns an abstention instead of generating an answer when no retrieved source supports the question. This is a product behavior, not evidence of medical reliability.",
                 },
                 {
                   question: "How does Retrieval-Augmented Generation work?",
                   answer:
-                    "Retrieval-Augmented Generation (RAG) combines large language models with a knowledge base of medical literature. When you input your health data, MedLLM retrieves relevant medical information from peer-reviewed journals, clinical guidelines, and medical databases, then generates personalized insights based on this information and your specific health profile.",
+                    "RAG retrieves relevant chunks from the local Chroma index and gives those excerpts to the selected local model. Normal mode is instructed to stay within those excerpts and displays the retrieved references.",
                 },
                 {
                   question: "Can MedLLM replace my doctor?",
                   answer:
-                    "No, MedLLM is designed to complement, not replace, healthcare professionals. It provides additional insights, helps identify patterns, and suggests potential considerations based on the latest research, but final diagnostic and treatment decisions should always be made by qualified healthcare providers.",
+                    "No. It is a software project for exploring local retrieval workflows. It does not diagnose, choose treatment, or establish medical reliability; seek appropriate professional care for health decisions.",
                 },
                 {
                   question: "How often is the medical knowledge base updated?",
                   answer:
-                    "Our medical knowledge base is updated daily with the latest peer-reviewed research, clinical guidelines, and medical advancements. This ensures that the insights provided are based on the most current medical knowledge available.",
+                    "The starter corpus is three reviewed CDC source cards with recorded dates and hashes. It is updated only through deliberate review and rebuild steps, so the project makes no currentness guarantee.",
                 },
               ].map((faq, index) => (
                 <motion.div

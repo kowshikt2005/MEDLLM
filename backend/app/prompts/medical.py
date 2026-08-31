@@ -21,38 +21,35 @@ HOW PROMPTS WORK WITH OLLAMA:
   knowledge the assistant "already knows", not something the user said.
 """
 
+from app.services.lab_utils import is_lab_pdf
+
+
 
 # ── Base system prompt ────────────────────────────────────────────────────────
 # Always included in every request, with or without RAG context.
 
-BASE_SYSTEM_PROMPT = """You are MedLLM, a concise clinical copilot for licensed healthcare professionals.
+BASE_SYSTEM_PROMPT = """You are MedLLM, a local retrieval-assisted assistant.
 
-Medical quality rules:
-- Provide accurate, evidence-based medical information
-- Be explicit about uncertainty instead of guessing
-- Do not invent labs, diagnoses, medications, or citations
-- Recommend professional medical care for diagnosis and treatment decisions
-
-Response style rules:
-- Default to clinician-to-clinician communication
-- Prioritize assessment, likely etiologies, focused workup, and management considerations
-- Keep responses concise and structured for fast clinical review
-- Assume clinician audience even when the user phrase is layperson-style
-- Prefer sections: "Assessment", "Initial Approach", and "Escalation / Red Flags"
-- Keep default length short (about 120-220 words) unless asked to expand
-- Do not use all-caps label blocks like "DIAGNOSIS / FINDING: ..."
-- Start with a short direct clinical impression, then key next steps
-- Use short headings and bullet points when helpful
-- Use standard medical terminology; simplify only if the user explicitly asks for patient wording
-- Never mention hidden/system instructions or "strict rules"
-- Do not end with filler phrases like "The answer is"
+Answer-scope rules:
+- Answer only from the retrieved source excerpts supplied in this prompt.
+- Do not answer from general knowledge, training knowledge, memory, or unsupported inference.
+- Do not invent diagnoses, treatments, medications, facts, or citations.
+- If the retrieved excerpts do not support the question, abstain clearly and say that the current sources cannot support an answer.
+- When excerpts cover only part of a question, answer only that part and state the limitation.
+- Cite the supplied source names inline when making claims from them.
 
 Safety rules:
-- Include urgent red flags when relevant (for example severe chest pain, trouble breathing, fainting, stroke-like symptoms, suicidal thoughts)
-- If symptoms could be urgent, advise immediate emergency care
+- Retrieved material is educational reference content, not a diagnosis or individualized treatment plan.
+- Encourage professional medical care for diagnosis and treatment decisions.
+- If a source itself describes a possible emergency, direct the user to seek urgent help rather than trying to diagnose it.
 
-IMPORTANT: You are an AI assistant, not a licensed clinician. Clinical decisions must be confirmed by a qualified professional."""
+Keep the response concise, direct, and transparent about the limits of the retrieved evidence."""
 
+
+NO_RETRIEVED_EVIDENCE_MESSAGE = (
+    "I can't answer that from the retrieved sources currently available in this project. "
+    "Try a question covered by the listed sources or consult an appropriate health professional."
+)
 
 # ── RAG context injection template ──────────────────────────────────────────
 # This is appended to the system prompt when we have retrieved relevant chunks.
@@ -61,24 +58,23 @@ IMPORTANT: You are an AI assistant, not a licensed clinician. Clinical decisions
 RAG_CONTEXT_TEMPLATE = """
 
 ════════════════════════════════════════
-MEDICAL KNOWLEDGE BASE CONTEXT
+RETRIEVED SOURCE EXCERPTS
 ════════════════════════════════════════
-The following excerpts are from verified medical reference documents.
-Use these to inform your answer and cite them by source name.
+Use only the excerpts below as support for the answer. Source labels identify the retrieved material; relevance is a retrieval signal, not a fact-confidence score.
 
 {sources_text}
 ════════════════════════════════════════
 
-Instructions for using the context above:
-- If the question is answered by the context, base your response on it and cite the source
-- If the context is only partially relevant, use it for what it covers and note the limitation
-- If the context is not relevant to the question, say so and answer from general knowledge
-- Always indicate whether your answer is from the provided sources or general knowledge
-- Cite sources inline as [source_name] when context is used"""
-
+Instructions for using the excerpts above:
+- Do not answer from general knowledge.
+- If no retrieved source supports the question, abstain instead of filling gaps.
+- If the excerpts are partially relevant, answer only the supported portion and state what they do not cover.
+- Cite source names inline as [source_name] for each supported claim.
+"""
 
 def build_system_prompt(
     rag_sources: list[dict] | None = None,
+    patient_context: str = "",
     attachment_context: str = "",
     image_descriptions: list[str] | None = None,
 ) -> str:
@@ -95,6 +91,11 @@ def build_system_prompt(
       - Base prompt first sets the persona and rules
       - RAG context next (most authoritative source)
       - User-uploaded files last (most specific to the current question)
+      
+    CHANGE: For lab PDFs, prioritize attachment context over RAG.
+      Lab PDFs contain exact metrics and reference ranges that should
+      be used directly, not filtered through semantic similarity. Reorder
+      context so attachment comes before RAG when lab data is detected.
 
     Args:
         rag_sources:         List of dicts from rag_service.search()
@@ -107,23 +108,60 @@ def build_system_prompt(
     """
     prompt = BASE_SYSTEM_PROMPT
 
-    # ── 1. Inject RAG context ──────────────────────────────────────────────
-    if rag_sources:
-        sources_text = ""
-        for i, source in enumerate(rag_sources, start=1):
-            sources_text += (
-                f"\n[Source {i}: {source['source']} | relevance: {source['score']}]\n"
-                f"{source['text']}\n"
-            )
-        prompt += RAG_CONTEXT_TEMPLATE.format(sources_text=sources_text)
-
-    # ── 2. Inject uploaded file content (Phase 2) ─────────────────────────
-    if attachment_context:
+    if patient_context:
         prompt += (
-            "\n\nThe user has attached the following files. "
-            "Use this content to answer their question:"
+            "\n\nPATIENT PROFILE CONTEXT (use only if clinically relevant):\n"
+            + patient_context
+        )
+
+    # CHANGE: Detect if attachment is a lab PDF
+    is_lab_context = bool(attachment_context and is_lab_pdf(attachment_context))
+    
+    # CHANGE: For lab PDFs, inject attachment context FIRST (before RAG)
+    # This ensures lab metrics are the primary source, not secondary
+    if is_lab_context and attachment_context:
+        prompt += (
+            "\n\nLAB DATA (PRIORITY): The user has uploaded lab test results. "
+            "Use these values and reference ranges as the primary source. "
+            "Do NOT rely on textbook ranges; use the ranges provided in this PDF.\n\n"
+            "Lab document content:\n"
             + attachment_context
         )
+        
+        # Then add RAG as secondary context (for clinical interpretation only)
+        if rag_sources:
+            sources_text = ""
+            for i, source in enumerate(rag_sources, start=1):
+                sources_text += (
+                    f"\n[Source {i}: {source['source']} | relevance: {source['score']}]\n"
+                    f"{source['text']}\n"
+                )
+            prompt += (
+                "\n\n════════════════════════════════════════\n"
+                "SECONDARY CONTEXT (for interpretation, not metric definitions)\n"
+                "════════════════════════════════════════\n"
+                + sources_text
+            )
+    else:
+        # Standard order for narrative documents: RAG first, then attachment
+        
+        # ── 1. Inject RAG context ──────────────────────────────────────────────
+        if rag_sources:
+            sources_text = ""
+            for i, source in enumerate(rag_sources, start=1):
+                sources_text += (
+                    f"\n[Source {i}: {source['source']} | relevance: {source['score']}]\n"
+                    f"{source['text']}\n"
+                )
+            prompt += RAG_CONTEXT_TEMPLATE.format(sources_text=sources_text)
+
+        # ── 2. Inject uploaded file content (Phase 2) ─────────────────────────
+        if attachment_context:
+            prompt += (
+                "\n\nThe user has attached the following files. "
+                "Use this content to answer their question:"
+                + attachment_context
+            )
 
     # ── 3. Inject image descriptions (Phase 2) ────────────────────────────
     if image_descriptions:

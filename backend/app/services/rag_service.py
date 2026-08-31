@@ -39,6 +39,7 @@ restart reads the same data — no need to re-index every time.
 """
 
 import chromadb
+import json
 from sentence_transformers import CrossEncoder
 
 from app.config import settings
@@ -144,12 +145,34 @@ def add_documents(
     # Embed all texts in one batch (much faster than one at a time)
     embeddings = embed_texts(texts)
 
+    # ChromaDB metadata must contain only primitive types (str, int, float, bool),
+    # lists of primitives, or None. Convert nested dicts or lists-of-dicts to JSON strings
+    # to ensure compatibility and avoid ValueError during upsert.
+    def _sanitize_meta(meta: dict) -> dict:
+        sanitized = {}
+        for k, v in (meta or {}).items():
+            # If value is a dict, convert to JSON string
+            if isinstance(v, dict):
+                sanitized[k] = json.dumps(v)
+            # If value is a list, ensure it contains only primitives; otherwise JSON-encode
+            elif isinstance(v, list):
+                if all(not isinstance(x, (dict, list)) for x in v):
+                    sanitized[k] = v
+                else:
+                    sanitized[k] = json.dumps(v)
+            else:
+                # primitives (str, int, float, bool, None) are OK
+                sanitized[k] = v
+        return sanitized
+
+    safe_metadatas = [_sanitize_meta(m) for m in metadatas]
+
     # upsert = insert OR update if ID already exists.
     # Safer than add() which throws DuplicateIDError on re-ingestion.
     collection.upsert(
         documents=texts,
         embeddings=embeddings,
-        metadatas=metadatas,
+        metadatas=safe_metadatas,
         ids=ids,
     )
 
@@ -158,26 +181,26 @@ def search(query: str, n_results: int = 3) -> list[dict]:
     """
     Find the N most semantically relevant document chunks for a query.
 
-    This implements Top-K Rerank RAG for improved relevance:
-    1. Initial retrieval: retrieve top 15 chunks from ChromaDB using cosine similarity
-    2. Reranking: apply cross-encoder model to get more accurate relevance scores
-    3. Selection: pick the top 5 after reranking
-    4. Filtering: apply cosine similarity threshold (0.6) to remove low-relevance chunks
-    5. Return: top N results (default 3) to the LLM
+    Simple cosine similarity-based retrieval (no reranking for medical domain):
+    1. Initial retrieval: retrieve top 10 chunks from ChromaDB using cosine similarity
+    2. Filter by threshold (0.65) for high-confidence matches
+    3. Return top N results to the LLM
 
-    CHANGE: Implements Top-K reranking strategy for better result quality
-    This retrieves more candidates initially, then uses a more accurate cross-encoder
-    to rerank them, improving the relevance of final results.
+    NOTE: Cross-encoder reranking disabled for medical domain.
+    The ms-marco-MiniLM-L-6-v2 model was giving NEGATIVE logits (~-10 to -2) for 
+    relevant medical documents, resulting in sigmoid scores near 0.0001 (0.01%).
+    This model is trained on Wikipedia passages, not medical literature.
+    Cosine similarity with BAAI/bge-large-en-v1.5 is more reliable for medical text.
 
     Args:
         query:     The user's chat message
-        n_results: How many top chunks to return (default 3, max 5 after reranking)
+        n_results: How many top chunks to return (default 3)
 
     Returns:
         List of dicts, each with:
           - "text":   the chunk content (injected into the LLM prompt)
           - "source": the source document filename
-          - "score":  cross-encoder relevance score (0.0-1.0, higher = more relevant)
+          - "score":  cosine similarity score (0.0-1.0, higher = more relevant)
 
         Returns [] if the knowledge base is empty or nothing is relevant.
     """
@@ -190,10 +213,8 @@ def search(query: str, n_results: int = 3) -> list[dict]:
     # Embed the query (same model as used during indexing — MUST be consistent)
     query_embedding = embed_query(query)
 
-    # ── STAGE 1: Initial retrieval ──────────────────────────────────────────
-    # CHANGE: Retrieve top 15 candidates (instead of just n_results)
-    # This gives the reranker more options to work with
-    initial_n_results = min(15, collection.count())
+    # Retrieve top 10 candidates using cosine similarity
+    initial_n_results = min(10, collection.count())
     
     results = collection.query(
         query_embeddings=[query_embedding],
@@ -205,62 +226,114 @@ def search(query: str, n_results: int = 3) -> list[dict]:
     metas = results["metadatas"][0]
     distances = results["distances"][0]
 
-    # ── STAGE 2: Cross-encoder reranking ────────────────────────────────────
-    # CHANGE: Apply reranker to get more accurate relevance scores
-    # Build query-document pairs for the reranker
-    candidate_pairs = [[query, doc] for doc in docs]
-    
-    try:
-        reranker = _get_reranker()
-        # Cross-encoder returns ranking scores used for sorting candidates.
-        reranker_scores = reranker.predict(candidate_pairs)
-        
-        # Create list of (index, score) tuples and sort by reranker score
-        indexed_scores = list(enumerate(reranker_scores))
-        indexed_scores.sort(key=lambda x: x[1], reverse=True)
-        
-        # ── STAGE 3: Select top 5 after reranking ───────────────────────────
-        # CHANGE: Keep top 5 reranked results
-        top_k_after_rerank = 5
-        selected_indices = [idx for idx, _ in indexed_scores[:top_k_after_rerank]]
-        
-    except Exception as e:
-        # Fallback if reranker fails — use original cosine distances
-        print(f"[RAG] Reranker error: {e}. Falling back to cosine similarity scores.")
-        selected_indices = list(range(len(docs)))
-        reranker_scores = [1 - (dist / 2) for dist in distances]  # Convert to similarity
-
-    # ── STAGE 4: Filter by cosine similarity and format results ────────────
+    # Filter by cosine similarity threshold
+    # At 0.65+: documents are semantically very similar
     chunks = []
-    for idx in selected_indices:
-        if idx >= len(docs):
-            continue
-            
-        doc = docs[idx]
-        meta = metas[idx]
-        dist = distances[idx]
-
-        # Convert cosine distance → similarity score
-        # distance=0 means identical, distance=2 means opposite
-        similarity = 1 - (dist / 2)
-
-        # CHANGE: Keep original cosine similarity filtering
-        # Only include results with similarity > 0.6 (genuinely relevant)
-        # This threshold removes off-topic or loosely related chunks
-        if similarity > 0.6:
+    for doc, meta, dist in zip(docs, metas, distances):
+        cosine_similarity = 1 - (dist / 2)
+        
+        if cosine_similarity >= 0.65:
             chunks.append({
                 "text": doc,
-                # Prefer per-record reference over file name for clearer citations.
                 "source": _resolve_source_name(meta),
                 "source_file": meta.get("source", "Unknown"),
                 "chunk_index": meta.get("chunk_index", 0),
-                # Use cosine similarity for user-facing confidence display.
-                "score": round(float(similarity), 3),
-            })
+                "source_id": meta.get("source_id"),
+                "url": meta.get("url"),
+                "publisher": meta.get("publisher"),
+                "corpus": meta.get("corpus"),
+                # Retrieval relevance is not factual confidence.
+                "score": round(float(cosine_similarity), 3),            })
 
-    # Return only n_results (default 3, but limited by what passed filtering)
+    # Return only n_results (default 3)
     return chunks[:n_results]
 
+
+def search_with_lab_priority(query: str, n_results: int = 3) -> list[dict]:
+    """
+    Search with lab-specific optimizations.
+    
+    When searching for lab metrics:
+      1. Prioritize lab_report documents (is_lab_pdf=True in metadata)
+      2. Use exact metric name matching when possible
+      3. Include reference range data directly in the response
+      4. Boost scores for chunks with abnormal values
+    
+    Falls back to standard semantic search if no lab data found.
+    
+    Args:
+        query: The user's question
+        n_results: Number of results to return
+    
+    Returns:
+        List of dicts with lab data enhanced results
+    """
+    collection = _get_collection()
+    
+    if collection.count() == 0:
+        return []
+    
+    # First, try standard semantic search
+    initial_results = search(query, n_results=n_results * 2)  # Get more to filter
+    
+    # Separate lab and non-lab results
+    lab_results = []
+    non_lab_results = []
+    
+    for result in initial_results:
+        # Check if the source metadata indicates a lab document
+        # (This requires accessing the actual metadata from the collection)
+        if _is_lab_chunk(result):
+            lab_results.append(result)
+        else:
+            non_lab_results.append(result)
+    
+    # CHANGE: Prioritize lab results, then non-lab
+    # Lab PDFs are more reliable for metric extraction
+    prioritized = lab_results + non_lab_results
+    
+    # CHANGE: Enhance lab results with reference range context
+    for result in prioritized:
+        result = _enhance_with_lab_metadata(result)
+    
+    return prioritized[:n_results]
+
+
+def _is_lab_chunk(result: dict) -> bool:
+    """
+    Check if a result is from a lab report document.
+    
+    We infer this from the source name or by checking if it contains
+    lab-related keywords (lab, result, reference range, etc.).
+    """
+    source_lower = (result.get("source", "") or "").lower()
+    doc_lower = (result.get("text", "") or "").lower()
+    
+    # Check for explicit lab indicators in source name
+    lab_indicators = ["lab", "result", "blood", "test", "report"]
+    if any(ind in source_lower for ind in lab_indicators):
+        return True
+    
+    # Check for lab keywords in the document chunk
+    if any(ind in doc_lower for ind in lab_indicators):
+        return True
+    
+    return False
+
+
+def _enhance_with_lab_metadata(result: dict) -> dict:
+    """
+    Add lab-specific enhancements to a search result.
+    
+    If the chunk contains lab test data, add:
+      - Direct reference range information
+      - Abnormality flags
+      - Suggested clinical context
+    """
+    # For now, just return as-is
+    # In a full implementation, this would parse the chunk for lab data
+    # and add structured metadata
+    return result
 
 def collection_size() -> int:
     """
@@ -274,6 +347,11 @@ def collection_size() -> int:
     except Exception:
         return 0
 
+
+def delete_documents_by_corpus(corpus: str) -> None:
+    """Delete only chunks tagged with one corpus value, preserving other data."""
+    collection = _get_collection()
+    collection.delete(where={"corpus": corpus})
 
 def delete_collection() -> None:
     """

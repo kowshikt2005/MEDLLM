@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.models.database import init_db
-from app.routers import auth, chat, upload, transcribe
+from app.routers import auth, chat, patient_data, runtime, transcribe, upload
 
 
 # ── Lifespan event ──────────────────────────────────────
@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
 # ── Create the app ──────────────────────────────────────
 app = FastAPI(
     title=settings.app_name,
-    description="Multimodal Medical AI Assistant with RAG and Agentic Reasoning",
+    description="Local document retrieval and model experimentation with RAG",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -84,8 +84,10 @@ app.add_middleware(
 # The prefix in each router determines the URL path.
 app.include_router(auth.router)         # /api/auth/signup, /api/auth/login
 app.include_router(chat.router)         # /api/chat
+app.include_router(runtime.router)      # /api/runtime
 app.include_router(upload.router)       # /api/upload
 app.include_router(transcribe.router)   # /api/transcribe
+app.include_router(patient_data.router) # /api/conversations, /api/profile
 
 
 # ── Health check endpoint ───────────────────────────────

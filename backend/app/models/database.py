@@ -13,7 +13,7 @@ Each attribute maps to a COLUMN in that table.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 
@@ -68,6 +68,7 @@ class User(Base):
     # Relationships: SQLAlchemy automatically joins these when accessed
     health_profile = relationship("HealthProfile", back_populates="user", uselist=False)
     conversations = relationship("Conversation", back_populates="user")
+    attachments = relationship("Attachment", back_populates="user")
 
 
 # ── Table: health_profiles ───────────────────────────────
@@ -163,6 +164,7 @@ class Attachment(Base):
     __tablename__ = "attachments"
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
     message_id = Column(String, ForeignKey("messages.id"), nullable=True)  # Null until message is sent
     filename = Column(String, nullable=False)
     file_type = Column(String, nullable=False)  # "pdf", "image", "docx", etc.
@@ -171,6 +173,7 @@ class Attachment(Base):
     created_at = Column(DateTime, default=utc_now)
 
     message = relationship("Message", back_populates="attachments")
+    user = relationship("User", back_populates="attachments")
 
 
 # ── Table: feedback ──────────────────────────────────────
@@ -196,6 +199,11 @@ async def init_db():
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight migration for existing SQLite installs.
+        columns = await conn.execute(text("PRAGMA table_info(attachments)"))
+        column_names = {row[1] for row in columns.fetchall()}
+        if "user_id" not in column_names:
+            await conn.execute(text("ALTER TABLE attachments ADD COLUMN user_id TEXT"))
 
 
 # ── Dependency for FastAPI routes ────────────────────────

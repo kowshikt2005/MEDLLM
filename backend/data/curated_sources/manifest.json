@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "corpus_name": "MedLLM curated CDC basics",
+  "scope": "Public education pages on diabetes and high blood pressure only.",
+  "attribution": "Source: Centers for Disease Control and Prevention (CDC).",
+  "non_endorsement_notice": "Use of these materials does not imply endorsement by CDC, HHS, or the United States Government of MedLLM or its developers.",
+  "availability_notice": "The source material is otherwise available without charge at the listed CDC URLs.",
+  "refresh_policy": "Review source pages before refreshing snapshots because CDC pages may change. Refreshing must record new SHA-256 values before rebuilding the index.",
+  "sources": [
+    {
+      "source_id": "cdc-diabetes-basics",
+      "title": "Diabetes Basics",
+      "publisher": "Centers for Disease Control and Prevention",
+      "url": "https://www.cdc.gov/diabetes/about/",
+      "published_date": "2026-01-02",
+      "accessed_date": "2026-08-31",
+      "snapshot": "cdc-diabetes-basics.txt",
+      "content_kind": "curated_source_card",
+      "snapshot_sha256": "c34f641c624d3ea223d7edf6b13e832851728fd52d6bd1a0fe80467c8a7194cc"
+    },
+    {
+      "source_id": "cdc-diabetes-symptoms",
+      "title": "Symptoms of Diabetes",
+      "publisher": "Centers for Disease Control and Prevention",
+      "url": "https://www.cdc.gov/diabetes/signs-symptoms/index.html",
+      "published_date": "2024-05-15",
+      "accessed_date": "2026-08-31",
+      "snapshot": "cdc-diabetes-symptoms.txt",
+      "content_kind": "curated_source_card",
+      "snapshot_sha256": "9a0f33a3966eb7f9f282976d0ad3002e0fa9cb950f5a9c41a11bb88420d81490"
+    },
+    {
+      "source_id": "cdc-high-blood-pressure-basics",
+      "title": "About High Blood Pressure",
+      "publisher": "Centers for Disease Control and Prevention",
+      "url": "https://www.cdc.gov/high-blood-pressure/about/",
+      "published_date": "2026-01-28",
+      "accessed_date": "2026-08-31",
+      "snapshot": "cdc-high-blood-pressure-basics.txt",
+      "content_kind": "curated_source_card",
+      "snapshot_sha256": "9cb3c503fbc2613da86741cc835670d3fb3e0e38ee81f21a4d41139789353f80"
+    }
+  ]
+}
